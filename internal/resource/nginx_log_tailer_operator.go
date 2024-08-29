@@ -21,7 +21,7 @@ type NginxLogTailerOperator struct {
 	agentConfig *config.Config
 }
 
-var _ logTailerOperator = (*NginxLogTailerOperator)(nil)
+var _ logOperator = (*NginxLogTailerOperator)(nil)
 
 var (
 	reloadErrorList = []*re.Regexp{

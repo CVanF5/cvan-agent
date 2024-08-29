@@ -68,6 +68,7 @@ type (
 	NginxDataPlaneConfig struct {
 		ReloadMonitoringPeriod time.Duration `yaml:"-" mapstructure:"reload_monitoring_period"`
 		TreatWarningsAsError   bool          `yaml:"-" mapstructure:"treat_warnings_as_error"`
+		UseSyslog              bool          `yaml:"-" mapstructure:"use_syslog"`
 	}
 
 	Client struct {
@@ -96,6 +97,7 @@ type (
 	Processor struct {
 		Type string `yaml:"-" mapstructure:"type"`
 	}
+
 	// OTel Collector Receiver configuration.
 	Receivers struct {
 		OtlpReceivers      []OtlpReceiver      `yaml:"-" mapstructure:"otlp_receivers"`

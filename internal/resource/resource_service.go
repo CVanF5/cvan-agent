@@ -26,33 +26,29 @@ import (
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.8.1 -generate
 //counterfeiter:generate . instanceOperator
 
-type resourceServiceInterface interface {
-	AddInstances(instanceList []*mpi.Instance) *mpi.Resource
-	UpdateInstances(instanceList []*mpi.Instance) *mpi.Resource
-	DeleteInstances(instanceList []*mpi.Instance) *mpi.Resource
-	ApplyConfig(ctx context.Context, instanceID string) error
-	Instance(instanceID string) *mpi.Instance
-}
-
 type (
+	resourceServiceInterface interface {
+		AddInstances(instanceList []*mpi.Instance) *mpi.Resource
+		UpdateInstances(instanceList []*mpi.Instance) *mpi.Resource
+		DeleteInstances(instanceList []*mpi.Instance) *mpi.Resource
+		ApplyConfig(ctx context.Context, instanceID string) error
+		Instance(instanceID string) *mpi.Instance
+	}
+
 	instanceOperator interface {
 		Validate(ctx context.Context, instance *mpi.Instance) error
 		Reload(ctx context.Context, instance *mpi.Instance) error
 	}
 
-	logTailerOperator interface {
-		Tail(ctx context.Context, errorLogs string, errorChannel chan error)
+	ResourceService struct {
+		resource          *mpi.Resource
+		agentConfig       *config.Config
+		instanceOperators map[string]instanceOperator // key is instance ID
+		info              host.InfoInterface
+		resourceMutex     sync.Mutex
+		operatorsMutex    sync.Mutex
 	}
 )
-
-type ResourceService struct {
-	resource          *mpi.Resource
-	agentConfig       *config.Config
-	instanceOperators map[string]instanceOperator // key is instance ID
-	info              host.InfoInterface
-	resourceMutex     sync.Mutex
-	operatorsMutex    sync.Mutex
-}
 
 func NewResourceService(ctx context.Context, agentConfig *config.Config) *ResourceService {
 	resourceService := &ResourceService{

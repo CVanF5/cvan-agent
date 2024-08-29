@@ -12,6 +12,7 @@ const (
 	DefGracefulShutdownPeriod      = 5 * time.Second
 	DefNginxReloadMonitoringPeriod = 10 * time.Second
 	DefTreatErrorsAsWarnings       = true
+	DefUseSyslog                   = false
 
 	DefCollectorConfigPath = "/var/run/nginx-agent/otelcol.yaml"
 

@@ -144,6 +144,12 @@ func registerFlags() {
 		"Warning messages in the NGINX errors logs after a NGINX reload will be treated as an error.",
 	)
 
+	fs.Bool(
+		NginxUseSyslogKey,
+		DefUseSyslog,
+		"Use syslog receiver to monitor for NGINX errors",
+	)
+
 	fs.Duration(ClientTimeoutKey, time.Minute, "Client timeout")
 	fs.String(ConfigDirectoriesKey, "/etc/nginx:/usr/local/etc/nginx:/usr/share/nginx/modules",
 		"Defines the paths that you want to grant NGINX Agent read/write access to."+
@@ -279,6 +285,7 @@ func resolveDataPlaneConfig() *DataPlaneConfig {
 		Nginx: &NginxDataPlaneConfig{
 			ReloadMonitoringPeriod: viperInstance.GetDuration(NginxReloadMonitoringPeriodKey),
 			TreatWarningsAsError:   viperInstance.GetBool(NginxTreatWarningsAsErrorsKey),
+			UseSyslog:              viperInstance.GetBool(NginxUseSyslogKey),
 		},
 	}
 }

@@ -17,17 +17,33 @@ import (
 	"github.com/nginx/agent/v3/internal/datasource/host/exec"
 )
 
-type NginxInstanceOperator struct {
-	executer  exec.ExecInterface
-	logTailer logTailerOperator
-}
+type (
+	logOperator interface {
+		Tail(ctx context.Context, errorLog string, errorChannel chan error)
+	}
+
+	NginxInstanceOperator struct {
+		executer  exec.ExecInterface
+		logTailer logOperator
+	}
+)
 
 var _ instanceOperator = (*NginxInstanceOperator)(nil)
 
 func NewInstanceOperator(agentConfig *config.Config) *NginxInstanceOperator {
+	var lo logOperator
+
+	if agentConfig.DataPlaneConfig.Nginx.UseSyslog {
+		slog.Info("Selecting syslog")
+		lo = NewSyslogOperator(agentConfig)
+	} else {
+		slog.Info("Selecting tailer")
+		lo = NewLogTailerOperator(agentConfig)
+	}
+
 	return &NginxInstanceOperator{
 		executer:  &exec.Exec{},
-		logTailer: NewLogTailerOperator(agentConfig),
+		logTailer: lo,
 	}
 }
 
