@@ -14,9 +14,7 @@ import (
 )
 
 const (
-	apiPort     = 8980
 	commandPort = 8981
-	metricsPort = 8982
 
 	clientPermitWithoutStream = true
 	clientTime                = 50 * time.Second
@@ -31,7 +29,7 @@ const (
 	reloadMonitoringPeriod = 400 * time.Millisecond
 
 	randomPort1 = 1234
-	randomPort2 = 4321
+	randomPort2 = 4317
 	randomPort3 = 1337
 )
 
@@ -51,22 +49,24 @@ func AgentConfig() *config.Config {
 		AllowedDirectories: []string{"/tmp/"},
 		Collector: &config.Collector{
 			ConfigPath: "/etc/nginx-agent/nginx-agent-otelcol.yaml",
-			Exporters: []config.Exporter{
-				{
-					Type: "otlp",
-					Server: &config.ServerConfig{
-						Host: "127.0.0.1",
-						Port: randomPort1,
-						Type: 0,
-					},
-					Auth: &config.AuthConfig{
-						Token: "super-secret-token",
+			Exporters: config.Exporters{
+				OtlpExporters: []config.OtlpExporter{
+					{
+						Server: &config.ServerConfig{
+							Host: "127.0.0.1",
+							Port: randomPort1,
+						},
+						Auth: &config.AuthConfig{
+							Token: "super-secret-token",
+						},
 					},
 				},
 			},
-			Processors: []config.Processor{
-				{
-					Type: "batch",
+			Processors: config.Processors{
+				Batch: &config.Batch{
+					SendBatchSize:    config.DefCollectorBatchProcessorSendBatchSize,
+					SendBatchMaxSize: config.DefCollectorBatchProcessorSendBatchMaxSize,
+					Timeout:          config.DefCollectorBatchProcessorTimeout,
 				},
 			},
 			Receivers: config.Receivers{
@@ -74,12 +74,27 @@ func AgentConfig() *config.Config {
 				HostMetrics: config.HostMetrics{
 					CollectionInterval: time.Minute,
 					InitialDelay:       time.Second,
+					Scrapers: &config.HostMetricsScrapers{
+						CPU:        &config.CPUScraper{},
+						Disk:       &config.DiskScraper{},
+						Filesystem: &config.FilesystemScraper{},
+						Memory:     &config.MemoryScraper{},
+						Network:    &config.NetworkScraper{},
+					},
 				},
 			},
-			Health: &config.ServerConfig{
-				Host: "localhost",
-				Port: randomPort3,
-				Type: 0,
+			Extensions: config.Extensions{
+				Health: &config.Health{
+					Server: &config.ServerConfig{
+						Host: "localhost",
+						Port: randomPort3,
+						Type: 0,
+					},
+				},
+			},
+			Log: &config.Log{
+				Level: "INFO",
+				Path:  "/var/log/nginx-agent/opentelemetry-collector-agent.log",
 			},
 		},
 		Command: &config.Command{
@@ -109,8 +124,9 @@ func AgentConfig() *config.Config {
 		},
 		DataPlaneConfig: &config.DataPlaneConfig{
 			Nginx: &config.NginxDataPlaneConfig{
-				TreatWarningsAsError:   true,
+				TreatWarningsAsErrors:  true,
 				ReloadMonitoringPeriod: reloadMonitoringPeriod,
+				ExcludeLogs:            "",
 			},
 		},
 		Watchers: &config.Watchers{
@@ -119,6 +135,9 @@ func AgentConfig() *config.Config {
 			},
 			InstanceHealthWatcher: config.InstanceHealthWatcher{
 				MonitoringFrequency: config.DefInstanceWatcherMonitoringFrequency,
+			},
+			FileWatcher: config.FileWatcher{
+				MonitoringFrequency: config.DefFileWatcherMonitoringFrequency,
 			},
 		},
 	}

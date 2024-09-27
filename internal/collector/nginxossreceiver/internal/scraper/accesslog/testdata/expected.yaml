@@ -1,0 +1,40 @@
+resourceMetrics:
+  - resource: {}
+    scopeMetrics:
+      - metrics:
+          - description: The number of responses, grouped by status code range.
+            name: nginx.http.response.status
+            sum:
+              aggregationTemporality: 2 # Cumulative
+              isMonotonic: true
+              dataPoints:
+                - asInt: 0
+                  attributes:
+                    - key: nginx.status_range
+                      value:
+                        stringValue: "1xx"
+                - asInt: 4
+                  attributes:
+                    - key: nginx.status_range
+                      value:
+                        stringValue: "2xx"
+                - asInt: 2
+                  attributes:
+                    - key: nginx.status_range
+                      value:
+                        stringValue: "3xx"
+                - asInt: 6
+                  attributes:
+                    - key: nginx.status_range
+                      value:
+                        stringValue: "4xx"
+                - asInt: 3
+                  attributes:
+                    - key: nginx.status_range
+                      value:
+                        stringValue: "5xx"
+                  timeUnixNano: "1000000"
+            unit: responses
+        scope:
+          name: otelcol/nginxreceiver
+          version: latest

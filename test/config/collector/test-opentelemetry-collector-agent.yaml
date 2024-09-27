@@ -5,26 +5,32 @@ receivers:
     scrapers:
       cpu:
       disk:
-      load:
       filesystem:
       memory:
       network:
-      paging:
-      processes:
-      process:
   otlp/0:
     protocols:
       grpc:
-        endpoint: "localhost:4321"
+        endpoint: "localhost:4317"
+        tls:
+          cert_file: /tmp/cert.pem
+          key_file: /tmp/key.pem
+          ca_file: /tmp/ca.pem
   nginx/123:
     endpoint: "http://localhost:80/status"
     collection_interval: 10s
+    access_logs:
+      - log_format: "$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent \"$http_referer\" \"$http_user_agent\" \"$http_x_forwarded_for\"\"$upstream_cache_status\""
+        file_path: "/var/log/nginx/access-custom.conf"
 
 processors:
   batch:
+    send_batch_size: 8192
+    timeout: 200ms
+    send_batch_max_size: 0
 
 exporters:
-  otlp:
+  otlp/0:
     endpoint: "127.0.0.1:1234"
     compression: none
     timeout: 10s
@@ -35,20 +41,22 @@ exporters:
       max_elapsed_time: 10m
     tls:
       insecure: true
-      
   prometheus:
     endpoint: "localhost:9876"
-    namespace: "nginx-agent"
   debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
-
 extensions:
   health_check:
     endpoint: "localhost:1337"
 
 service:
+  telemetry:
+    logs:
+      level: INFO
+      output_paths: ["/var/log/nginx-agent/opentelemetry-collector-agent.log"]
+      error_output_paths: ["/var/log/nginx-agent/opentelemetry-collector-agent.log"]
   extensions:
     - health_check
   pipelines:
@@ -60,6 +68,6 @@ service:
       processors:
         - batch
       exporters:
-        - otlp
+        - otlp/0
         - prometheus
         - debug

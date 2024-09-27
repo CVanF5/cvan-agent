@@ -19,11 +19,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const accessLogFormat = `$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent ` +
+	`\"$http_referer\" \"$http_user_agent\" \"$http_x_forwarded_for\"\"$upstream_cache_status\"`
+
 func TestRegisterConfigFile(t *testing.T) {
 	viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
 	file, err := os.Create("nginx-agent.conf")
-	defer helpers.RemoveFileWithErrorCheck(t, file.Name())
 	require.NoError(t, err)
+	defer helpers.RemoveFileWithErrorCheck(t, file.Name())
 
 	currentDirectory, err := os.Getwd()
 	require.NoError(t, err)
@@ -36,7 +39,10 @@ func TestRegisterConfigFile(t *testing.T) {
 }
 
 func TestResolveConfig(t *testing.T) {
-	allowedDir := []string{"/etc/nginx", "/usr/local/etc/nginx", "/var/run/nginx", "/usr/share/nginx/modules"}
+	allowedDir := []string{
+		"/etc/nginx", "/usr/local/etc/nginx", "/var/run/nginx",
+		"/usr/share/nginx/modules", "/var/log/nginx",
+	}
 	viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
 	err := loadPropertiesFromFile("./testdata/nginx-agent.conf")
 	require.NoError(t, err)
@@ -47,7 +53,7 @@ func TestResolveConfig(t *testing.T) {
 	assert.True(t, viperInstance.IsSet(CollectorExportersKey))
 	assert.True(t, viperInstance.IsSet(CollectorProcessorsKey))
 	assert.True(t, viperInstance.IsSet(CollectorReceiversKey))
-	assert.True(t, viperInstance.IsSet(CollectorHealthKey))
+	assert.True(t, viperInstance.IsSet(CollectorExtensionsKey))
 
 	actual, err := ResolveConfig()
 	require.NoError(t, err)
@@ -56,21 +62,28 @@ func TestResolveConfig(t *testing.T) {
 	assert.Equal(t, "./", actual.Log.Path)
 
 	assert.Equal(t, 30*time.Second, actual.DataPlaneConfig.Nginx.ReloadMonitoringPeriod)
-	assert.False(t, actual.DataPlaneConfig.Nginx.TreatWarningsAsError)
+	assert.False(t, actual.DataPlaneConfig.Nginx.TreatWarningsAsErrors)
+	assert.Equal(t, "/var/log/nginx/error.log:/var/log/nginx/access.log", actual.DataPlaneConfig.Nginx.ExcludeLogs)
 
 	require.NotNil(t, actual.Collector)
 	assert.Equal(t, "/etc/nginx-agent/nginx-agent-otelcol.yaml", actual.Collector.ConfigPath)
 	assert.NotEmpty(t, actual.Collector.Receivers)
-	assert.NotEmpty(t, actual.Collector.Processors)
+	assert.Equal(t, Processors{Batch: &Batch{}}, actual.Collector.Processors)
 	assert.NotEmpty(t, actual.Collector.Exporters)
-	assert.NotEmpty(t, actual.Collector.Health)
+	assert.NotEmpty(t, actual.Collector.Extensions)
 
 	assert.Equal(t, 10*time.Second, actual.Client.Timeout)
 
-	assert.Equal(t, "/etc/nginx:/usr/local/etc/nginx:/var/run/nginx:/usr/share/nginx/modules:invalid/path",
-		actual.ConfigDir)
+	assert.Equal(t,
+		"/etc/nginx:/usr/local/etc/nginx:/var/run/nginx:/usr/share/nginx/modules:/var/log/nginx:invalid/path",
+		actual.ConfigDir,
+	)
 
 	assert.Equal(t, allowedDir, actual.AllowedDirectories)
+
+	assert.Equal(t, 5*time.Second, actual.Watchers.InstanceWatcher.MonitoringFrequency)
+	assert.Equal(t, 5*time.Second, actual.Watchers.InstanceHealthWatcher.MonitoringFrequency)
+	assert.Equal(t, 5*time.Second, actual.Watchers.FileWatcher.MonitoringFrequency)
 }
 
 func TestSetVersion(t *testing.T) {
@@ -159,73 +172,40 @@ func TestResolveClient(t *testing.T) {
 
 func TestResolveCollector(t *testing.T) {
 	testDefault := getAgentConfig()
-	tests := []struct {
-		expected  *Collector
-		name      string
-		errMsg    string
-		shouldErr bool
-	}{
-		{
-			name:     "Test 1: Happy path",
-			expected: testDefault.Collector,
-		},
-		{
-			name: "Test 2: Non allowed path",
-			expected: &Collector{
-				ConfigPath: "/path/to/secret",
-			},
-			shouldErr: true,
-			errMsg:    "collector path /path/to/secret not allowed",
-		},
-		{
-			name: "Test 3: Unsupported Exporter",
-			expected: &Collector{
-				ConfigPath: testDefault.Collector.ConfigPath,
-				Exporters: []Exporter{
-					{
-						Type: "not-allowed",
-					},
-				},
-			},
-			shouldErr: true,
-			errMsg:    "unsupported exporter type: not-allowed",
-		},
-		{
-			name: "Test 4: Unsupported Processor",
-			expected: &Collector{
-				ConfigPath: testDefault.Collector.ConfigPath,
-				Exporters:  testDefault.Collector.Exporters,
-				Processors: []Processor{
-					{
-						Type: "custom-processor",
-					},
-				},
-			},
-			shouldErr: true,
-			errMsg:    "unsupported processor type: custom-processor",
-		},
-	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
-			viperInstance.Set(CollectorRootKey, "set")
-			viperInstance.Set(CollectorConfigPathKey, test.expected.ConfigPath)
-			viperInstance.Set(CollectorReceiversKey, test.expected.Receivers)
-			viperInstance.Set(CollectorProcessorsKey, test.expected.Processors)
-			viperInstance.Set(CollectorExportersKey, test.expected.Exporters)
-			viperInstance.Set(CollectorHealthKey, test.expected.Health)
+	t.Run("Test 1: Happy path", func(t *testing.T) {
+		expected := testDefault.Collector
 
-			actual, err := resolveCollector(testDefault.AllowedDirectories)
-			if test.shouldErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), test.errMsg)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, test.expected, actual)
-			}
-		})
-	}
+		viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
+		viperInstance.Set(CollectorConfigPathKey, expected.ConfigPath)
+		viperInstance.Set(CollectorReceiversKey, expected.Receivers)
+		viperInstance.Set(CollectorBatchProcessorKey, expected.Processors.Batch)
+		viperInstance.Set(CollectorBatchProcessorSendBatchSizeKey, expected.Processors.Batch.SendBatchSize)
+		viperInstance.Set(CollectorBatchProcessorSendBatchMaxSizeKey, expected.Processors.Batch.SendBatchMaxSize)
+		viperInstance.Set(CollectorBatchProcessorTimeoutKey, expected.Processors.Batch.Timeout)
+		viperInstance.Set(CollectorExportersKey, expected.Exporters)
+		viperInstance.Set(CollectorExtensionsKey, expected.Extensions)
+		viperInstance.Set(CollectorLogKey, expected.Log)
+
+		actual, err := resolveCollector(testDefault.AllowedDirectories)
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	})
+
+	t.Run("Test 2: Non allowed path", func(t *testing.T) {
+		expected := &Collector{
+			ConfigPath: "/path/to/secret",
+		}
+		errMsg := "collector path /path/to/secret not allowed"
+
+		viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
+		viperInstance.Set(CollectorConfigPathKey, expected.ConfigPath)
+
+		_, err := resolveCollector(testDefault.AllowedDirectories)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), errMsg)
+	})
 }
 
 func TestCommand(t *testing.T) {
@@ -282,6 +262,28 @@ func TestMissingServerTLS(t *testing.T) {
 	assert.Nil(t, result.TLS)
 }
 
+func TestClient(t *testing.T) {
+	viperInstance = viper.NewWithOptions(viper.KeyDelimiter(KeyDelimiter))
+	expected := getAgentConfig().Client
+
+	viperInstance.Set(ClientMaxMessageSizeKey, expected.MaxMessageSize)
+	viperInstance.Set(ClientPermitWithoutStreamKey, expected.PermitWithoutStream)
+	viperInstance.Set(ClientTimeKey, expected.Time)
+	viperInstance.Set(ClientTimeoutKey, expected.Timeout)
+
+	// root keys for sections are set appropriately
+	assert.True(t, viperInstance.IsSet(ClientMaxMessageSizeKey))
+	assert.False(t, viperInstance.IsSet(ClientMaxMessageReceiveSizeKey))
+	assert.False(t, viperInstance.IsSet(ClientMaxMessageSendSizeKey))
+
+	viperInstance.Set(ClientMaxMessageReceiveSizeKey, expected.MaxMessageRecieveSize)
+	viperInstance.Set(ClientMaxMessageSendSizeKey, expected.MaxMessageSendSize)
+
+	result := resolveClient()
+
+	assert.Equal(t, expected, result)
+}
+
 func getAgentConfig() *Config {
 	return &Config{
 		UUID:    "",
@@ -289,37 +291,44 @@ func getAgentConfig() *Config {
 		Path:    "",
 		Log:     &Log{},
 		Client: &Client{
-			Timeout: 5 * time.Second,
+			Timeout:               5 * time.Second,
+			Time:                  4 * time.Second,
+			PermitWithoutStream:   true,
+			MaxMessageSize:        1,
+			MaxMessageRecieveSize: 20,
+			MaxMessageSendSize:    40,
 		},
 		ConfigDir: "",
 		AllowedDirectories: []string{
-			"/etc/nginx", "/usr/local/etc/nginx", "/var/run/nginx", "/usr/share/nginx/modules",
+			"/etc/nginx", "/usr/local/etc/nginx", "/var/run/nginx", "/var/log/nginx", "/usr/share/nginx/modules",
 		},
 		Collector: &Collector{
 			ConfigPath: "/etc/nginx-agent/nginx-agent-otelcol.yaml",
-			Exporters: []Exporter{
-				{
-					Type: "otlp",
-					Server: &ServerConfig{
-						Host: "127.0.0.1",
-						Port: 1234,
-						Type: 0,
-					},
-					Auth: &AuthConfig{
-						Token: "super-secret-token",
-					},
-					TLS: &TLSConfig{
-						Cert:       "/path/to/server-cert.pem",
-						Key:        "/path/to/server-cert.pem",
-						Ca:         "/path/to/server-cert.pem",
-						SkipVerify: true,
-						ServerName: "remote-saas-server",
+			Exporters: Exporters{
+				OtlpExporters: []OtlpExporter{
+					{
+						Server: &ServerConfig{
+							Host: "127.0.0.1",
+							Port: 1234,
+						},
+						Auth: &AuthConfig{
+							Token: "super-secret-token",
+						},
+						TLS: &TLSConfig{
+							Cert:       "/path/to/server-cert.pem",
+							Key:        "/path/to/server-cert.pem",
+							Ca:         "/path/to/server-cert.pem",
+							SkipVerify: true,
+							ServerName: "remote-saas-server",
+						},
 					},
 				},
 			},
-			Processors: []Processor{
-				{
-					Type: "batch",
+			Processors: Processors{
+				Batch: &Batch{
+					SendBatchMaxSize: DefCollectorBatchProcessorSendBatchMaxSize,
+					SendBatchSize:    DefCollectorBatchProcessorSendBatchSize,
+					Timeout:          DefCollectorBatchProcessorTimeout,
 				},
 			},
 			Receivers: Receivers{
@@ -327,26 +336,47 @@ func getAgentConfig() *Config {
 					{
 						Server: &ServerConfig{
 							Host: "localhost",
-							Port: 4321,
+							Port: 4317,
 							Type: 0,
 						},
 						Auth: &AuthConfig{
 							Token: "even-secreter-token",
 						},
-						TLS: &TLSConfig{
-							Cert:       "/path/to/server-cert.pem",
-							Key:        "/path/to/server-cert.pem",
-							Ca:         "/path/to/server-cert.pem",
-							SkipVerify: true,
-							ServerName: "local-dataa-plane-server",
+						OtlpTLSConfig: &OtlpTLSConfig{
+							GenerateSelfSignedCert: false,
+							Cert:                   "/path/to/server-cert.pem",
+							Key:                    "/path/to/server-cert.pem",
+							Ca:                     "/path/to/server-cert.pem",
+							SkipVerify:             true,
+							ServerName:             "local-data-plane-server",
+						},
+					},
+				},
+				NginxReceivers: []NginxReceiver{
+					{
+						InstanceID: "cd7b8911-c2c5-4daf-b311-dbead151d938",
+						StubStatus: "http://localhost:4321/status",
+						AccessLogs: []AccessLog{
+							{
+								LogFormat: accessLogFormat,
+								FilePath:  "/var/log/nginx/access-custom.conf",
+							},
 						},
 					},
 				},
 			},
-			Health: &ServerConfig{
-				Host: "localhost",
-				Port: 1337,
-				Type: 0,
+			Extensions: Extensions{
+				Health: &Health{
+					Server: &ServerConfig{
+						Host: "localhost",
+						Port: 1337,
+						Type: 0,
+					},
+				},
+			},
+			Log: &Log{
+				Level: "INFO",
+				Path:  "/var/log/nginx-agent/opentelemetry-collector-agent.log",
 			},
 		},
 		Command: &Command{

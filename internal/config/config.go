@@ -12,9 +12,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	selfsignedcerts "github.com/nginx/agent/v3/pkg/tls"
 	uuidLibrary "github.com/nginx/agent/v3/pkg/uuid"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
@@ -124,7 +126,7 @@ func registerFlags() {
 		"info",
 		`The desired verbosity level for logging messages from nginx-agent. 
 		Available options, in order of severity from highest to lowest, are: 
-		panic, fatal, error, info, debug, and trace.`,
+		panic, fatal, error, info and debug.`,
 	)
 	fs.String(
 		LogPathKey,
@@ -144,6 +146,13 @@ func registerFlags() {
 		"Warning messages in the NGINX errors logs after a NGINX reload will be treated as an error.",
 	)
 
+	fs.String(
+		NginxExcludeLogsKey,
+		"",
+		"One or more NGINX log paths that you want to exclude from metrics collection or error monitoring "+
+			"This key is formatted as a string and follows Unix PATH format",
+	)
+
 	fs.Bool(
 		NginxUseSyslogKey,
 		DefUseSyslog,
@@ -151,7 +160,8 @@ func registerFlags() {
 	)
 
 	fs.Duration(ClientTimeoutKey, time.Minute, "Client timeout")
-	fs.String(ConfigDirectoriesKey, "/etc/nginx:/usr/local/etc/nginx:/usr/share/nginx/modules",
+	fs.String(ConfigDirectoriesKey,
+		DefConfigDirectories,
 		"Defines the paths that you want to grant NGINX Agent read/write access to."+
 			" This key is formatted as a string and follows Unix PATH format")
 
@@ -207,11 +217,32 @@ func registerFlags() {
 		DefInstanceHealthWatcherMonitoringFrequency,
 		"How often the NGINX Agent will check for instance health changes.",
 	)
-	fs.String(
-		CollectorConfigPathKey,
-		DefCollectorConfigPath,
-		"The path to the Opentelemetry Collector configuration file.",
+
+	fs.Duration(
+		FileWatcherMonitoringFrequencyKey,
+		DefFileWatcherMonitoringFrequency,
+		"How often the NGINX Agent will check for file changes.",
 	)
+
+	fs.Int(
+		ClientMaxMessageSizeKey,
+		DefMaxMessageSize,
+		"The value used, if not 0, for both max_message_send_size and max_message_receive_size",
+	)
+
+	fs.Int(
+		ClientMaxMessageReceiveSizeKey,
+		DefMaxMessageRecieveSize,
+		"Updates the client grpc setting MaxRecvMsgSize with the specific value in MB.",
+	)
+
+	fs.Int(
+		ClientMaxMessageSendSizeKey,
+		DefMaxMessageSendSize,
+		"Updates the client grpc setting MaxSendMsgSize with the specific value in MB.",
+	)
+
+	registerCollectorFlags(fs)
 
 	fs.SetNormalizeFunc(normalizeFunc)
 
@@ -224,6 +255,47 @@ func registerFlags() {
 			slog.Warn("Error occurred binding env", "env", flag.Name, "error", err)
 		}
 	})
+}
+
+func registerCollectorFlags(fs *flag.FlagSet) {
+	fs.String(
+		CollectorConfigPathKey,
+		DefCollectorConfigPath,
+		"The path to the Opentelemetry Collector configuration file.",
+	)
+
+	fs.String(
+		CollectorLogLevelKey,
+		DefCollectorLogLevel,
+		`The desired verbosity level for logging messages from nginx-agent OTel collector. 
+		Available options, in order of severity from highest to lowest, are: 
+		ERROR, WARN, INFO and DEBUG.`,
+	)
+
+	fs.String(
+		CollectorLogPathKey,
+		DefCollectorLogPath,
+		`The path to output OTel collector log messages to. 
+		If the default path doesn't exist, log messages are output to stdout/stderr.`,
+	)
+
+	fs.Uint32(
+		CollectorBatchProcessorSendBatchSizeKey,
+		DefCollectorBatchProcessorSendBatchSize,
+		`Number of metric data points after which a batch will be sent regardless of the timeout.`,
+	)
+
+	fs.Uint32(
+		CollectorBatchProcessorSendBatchMaxSizeKey,
+		DefCollectorBatchProcessorSendBatchMaxSize,
+		`The upper limit of the batch size.`,
+	)
+
+	fs.Duration(
+		CollectorBatchProcessorTimeoutKey,
+		DefCollectorBatchProcessorTimeout,
+		`Time duration after which a batch will be sent regardless of size.`,
+	)
 }
 
 func seekFileInPaths(fileName string, directories ...string) (string, error) {
@@ -284,7 +356,8 @@ func resolveDataPlaneConfig() *DataPlaneConfig {
 	return &DataPlaneConfig{
 		Nginx: &NginxDataPlaneConfig{
 			ReloadMonitoringPeriod: viperInstance.GetDuration(NginxReloadMonitoringPeriodKey),
-			TreatWarningsAsError:   viperInstance.GetBool(NginxTreatWarningsAsErrorsKey),
+			TreatWarningsAsErrors:  viperInstance.GetBool(NginxTreatWarningsAsErrorsKey),
+			ExcludeLogs:            viperInstance.GetString(NginxExcludeLogsKey),
 			UseSyslog:              viperInstance.GetBool(NginxUseSyslogKey),
 		},
 	}
@@ -292,9 +365,12 @@ func resolveDataPlaneConfig() *DataPlaneConfig {
 
 func resolveClient() *Client {
 	return &Client{
-		Timeout:             viperInstance.GetDuration(ClientTimeoutKey),
-		Time:                viperInstance.GetDuration(ClientTimeKey),
-		PermitWithoutStream: viperInstance.GetBool(ClientPermitWithoutStreamKey),
+		Timeout:               viperInstance.GetDuration(ClientTimeoutKey),
+		Time:                  viperInstance.GetDuration(ClientTimeKey),
+		PermitWithoutStream:   viperInstance.GetBool(ClientPermitWithoutStreamKey),
+		MaxMessageSize:        viperInstance.GetInt(ClientMaxMessageSizeKey),
+		MaxMessageRecieveSize: viperInstance.GetInt(ClientMaxMessageReceiveSizeKey),
+		MaxMessageSendSize:    viperInstance.GetInt(ClientMaxMessageSendSizeKey),
 	}
 }
 
@@ -307,30 +383,44 @@ func resolveCollector(allowedDirs []string) (*Collector, error) {
 	}
 
 	var (
-		err         error
-		exporters   []Exporter
-		processors  []Processor
-		receivers   Receivers
-		healthCheck ServerConfig
+		err        error
+		exporters  Exporters
+		receivers  Receivers
+		extensions Extensions
+		log        Log
 	)
 
 	err = errors.Join(
 		err,
 		resolveMapStructure(CollectorExportersKey, &exporters),
-		resolveMapStructure(CollectorProcessorsKey, &processors),
 		resolveMapStructure(CollectorReceiversKey, &receivers),
-		resolveMapStructure(CollectorHealthKey, &healthCheck),
+		resolveMapStructure(CollectorExtensionsKey, &extensions),
+		resolveMapStructure(CollectorLogKey, &log),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal collector config: %w", err)
 	}
 
+	if log.Level == "" {
+		log.Level = DefCollectorLogLevel
+	}
+
+	if log.Path == "" {
+		log.Path = DefCollectorLogPath
+	}
+
 	col := &Collector{
 		ConfigPath: viperInstance.GetString(CollectorConfigPathKey),
 		Exporters:  exporters,
-		Processors: processors,
+		Processors: resolveProcessors(),
 		Receivers:  receivers,
-		Health:     &healthCheck,
+		Extensions: extensions,
+		Log:        &log,
+	}
+
+	// Check for self-signed certificate true in Agent conf
+	if err = handleSelfSignedCertificates(col); err != nil {
+		return nil, err
 	}
 
 	err = col.Validate(allowedDirs)
@@ -339,6 +429,70 @@ func resolveCollector(allowedDirs []string) (*Collector, error) {
 	}
 
 	return col, nil
+}
+
+func resolveProcessors() Processors {
+	processors := Processors{}
+
+	if viperInstance.IsSet(CollectorBatchProcessorKey) {
+		processors.Batch = &Batch{}
+		processors.Batch.SendBatchSize = viperInstance.GetUint32(CollectorBatchProcessorSendBatchSizeKey)
+		processors.Batch.SendBatchMaxSize = viperInstance.GetUint32(CollectorBatchProcessorSendBatchMaxSizeKey)
+		processors.Batch.Timeout = viperInstance.GetDuration(CollectorBatchProcessorTimeoutKey)
+	}
+
+	return processors
+}
+
+// generate self-signed certificate for OTEL receiver
+// nolint: revive
+func handleSelfSignedCertificates(col *Collector) error {
+	if col.Receivers.OtlpReceivers != nil {
+		for _, receiver := range col.Receivers.OtlpReceivers {
+			if receiver.OtlpTLSConfig != nil && receiver.OtlpTLSConfig.GenerateSelfSignedCert {
+				err := processOtlpReceivers(receiver.OtlpTLSConfig)
+				if err != nil {
+					return fmt.Errorf("failed to generate self-signed certificate: %w", err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func processOtlpReceivers(tlsConfig *OtlpTLSConfig) error {
+	sanNames := strings.Split(DefCollectorTLSSANNames, ",")
+
+	if tlsConfig.Ca == "" {
+		tlsConfig.Ca = DefCollectorTLSCAPath
+	}
+	if tlsConfig.Cert == "" {
+		tlsConfig.Cert = DefCollectorTLSCertPath
+	}
+	if tlsConfig.Key == "" {
+		tlsConfig.Key = DefCollectorTLSKeyPath
+	}
+
+	if !slices.Contains(sanNames, tlsConfig.ServerName) {
+		sanNames = append(sanNames, tlsConfig.ServerName)
+	}
+	if len(sanNames) > 0 {
+		existingCert, err := selfsignedcerts.GenerateServerCerts(
+			sanNames,
+			tlsConfig.Ca,
+			tlsConfig.Cert,
+			tlsConfig.Key,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to generate self-signed certificate: %w", err)
+		}
+		if existingCert {
+			tlsConfig.ExistingCert = true
+		}
+	}
+
+	return nil
 }
 
 func resolveCommand() *Command {
@@ -400,6 +554,9 @@ func resolveWatchers() *Watchers {
 		},
 		InstanceHealthWatcher: InstanceHealthWatcher{
 			MonitoringFrequency: DefInstanceHealthWatcherMonitoringFrequency,
+		},
+		FileWatcher: FileWatcher{
+			MonitoringFrequency: DefFileWatcherMonitoringFrequency,
 		},
 	}
 }

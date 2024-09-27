@@ -6,22 +6,13 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
-)
 
-var (
-	supportedExporters = map[string]struct{}{
-		"debug":      {},
-		"otlp":       {},
-		"prometheus": {},
-	}
-
-	supportedProcessors = map[string]struct{}{
-		"batch": {},
-	}
+	"github.com/google/uuid"
 )
 
 type ServerType int
@@ -66,8 +57,9 @@ type (
 	}
 
 	NginxDataPlaneConfig struct {
+		ExcludeLogs            string        `yaml:"-" mapstructure:"exclude_logs"`
 		ReloadMonitoringPeriod time.Duration `yaml:"-" mapstructure:"reload_monitoring_period"`
-		TreatWarningsAsError   bool          `yaml:"-" mapstructure:"treat_warnings_as_error"`
+		TreatWarningsAsErrors  bool          `yaml:"-" mapstructure:"treat_warnings_as_errors"`
 		UseSyslog              bool          `yaml:"-" mapstructure:"use_syslog"`
 	}
 
@@ -75,27 +67,60 @@ type (
 		Timeout             time.Duration `yaml:"-" mapstructure:"timeout"`
 		Time                time.Duration `yaml:"-" mapstructure:"time"`
 		PermitWithoutStream bool          `yaml:"-" mapstructure:"permit_without_stream"`
+		// if MaxMessageSize is size set then we use that value,
+		// otherwise MaxMessageRecieveSize and MaxMessageSendSize for individual settings
+		MaxMessageSize        int `yaml:"-" mapstructure:"max_message_size"`
+		MaxMessageRecieveSize int `yaml:"-" mapstructure:"max_message_receive_size"`
+		MaxMessageSendSize    int `yaml:"-" mapstructure:"max_message_send_size"`
 	}
 
 	Collector struct {
-		ConfigPath string        `yaml:"-" mapstructure:"config_path"`
-		Exporters  []Exporter    `yaml:"-" mapstructure:"exporters"`
-		Health     *ServerConfig `yaml:"-" mapstructure:"health"`
-		Processors []Processor   `yaml:"-" mapstructure:"processors"`
-		Receivers  Receivers     `yaml:"-" mapstructure:"receivers"`
+		ConfigPath string     `yaml:"-" mapstructure:"config_path"`
+		Log        *Log       `yaml:"-" mapstructure:"log"`
+		Exporters  Exporters  `yaml:"-" mapstructure:"exporters"`
+		Extensions Extensions `yaml:"-" mapstructure:"extensions"`
+		Processors Processors `yaml:"-" mapstructure:"processors"`
+		Receivers  Receivers  `yaml:"-" mapstructure:"receivers"`
 	}
 
-	// OTel Collector Exporter configuration.
-	Exporter struct {
+	Exporters struct {
+		Debug              *DebugExporter      `yaml:"-" mapstructure:"debug"`
+		PrometheusExporter *PrometheusExporter `yaml:"-" mapstructure:"prometheus_exporter"`
+		OtlpExporters      []OtlpExporter      `yaml:"-" mapstructure:"otlp_exporters"`
+	}
+
+	OtlpExporter struct {
 		Server *ServerConfig `yaml:"-" mapstructure:"server"`
 		Auth   *AuthConfig   `yaml:"-" mapstructure:"auth"`
 		TLS    *TLSConfig    `yaml:"-" mapstructure:"tls"`
-		Type   string        `yaml:"-" mapstructure:"type"`
 	}
 
-	// OTel Collector Processor configuration.
-	Processor struct {
-		Type string `yaml:"-" mapstructure:"type"`
+	Extensions struct {
+		Health *Health `yaml:"-" mapstructure:"health"`
+	}
+
+	Health struct {
+		Server *ServerConfig `yaml:"-" mapstructure:"server"`
+		TLS    *TLSConfig    `yaml:"-" mapstructure:"tls"`
+		Path   string        `yaml:"-" mapstructure:"path"`
+	}
+
+	DebugExporter struct{}
+
+	PrometheusExporter struct {
+		Server *ServerConfig `yaml:"-" mapstructure:"server"`
+		TLS    *TLSConfig    `yaml:"-" mapstructure:"tls"`
+	}
+
+	// OTel Collector Processors configuration.
+	Processors struct {
+		Batch *Batch `yaml:"-" mapstructure:"batch"`
+	}
+
+	Batch struct {
+		SendBatchSize    uint32        `yaml:"-" mapstructure:"send_batch_size"`
+		SendBatchMaxSize uint32        `yaml:"-" mapstructure:"send_batch_max_size"`
+		Timeout          time.Duration `yaml:"-" mapstructure:"timeout"`
 	}
 
 	// OTel Collector Receiver configuration.
@@ -107,14 +132,20 @@ type (
 	}
 
 	OtlpReceiver struct {
-		Server *ServerConfig `yaml:"-" mapstructure:"server"`
-		Auth   *AuthConfig   `yaml:"-" mapstructure:"auth"`
-		TLS    *TLSConfig    `yaml:"-" mapstructure:"tls"`
+		Server        *ServerConfig  `yaml:"-" mapstructure:"server"`
+		Auth          *AuthConfig    `yaml:"-" mapstructure:"auth"`
+		OtlpTLSConfig *OtlpTLSConfig `yaml:"-" mapstructure:"tls"`
 	}
 
 	NginxReceiver struct {
-		InstanceID string `yaml:"-" mapstructure:"instance_id"`
-		StubStatus string `yaml:"-" mapstructure:"stub_status"`
+		InstanceID string      `yaml:"-" mapstructure:"instance_id"`
+		StubStatus string      `yaml:"-" mapstructure:"stub_status"`
+		AccessLogs []AccessLog `yaml:"-" mapstructure:"access_logs"`
+	}
+
+	AccessLog struct {
+		FilePath  string `yaml:"-" mapstructure:"file_path"`
+		LogFormat string `yaml:"-" mapstructure:"log_format"`
 	}
 
 	NginxPlusReceiver struct {
@@ -123,9 +154,23 @@ type (
 	}
 
 	HostMetrics struct {
-		CollectionInterval time.Duration `yaml:"-" mapstructure:"collection_interval"`
-		InitialDelay       time.Duration `yaml:"-" mapstructure:"initial_delay"`
+		Scrapers           *HostMetricsScrapers `yaml:"-" mapstructure:"scrapers"`
+		CollectionInterval time.Duration        `yaml:"-" mapstructure:"collection_interval"`
+		InitialDelay       time.Duration        `yaml:"-" mapstructure:"initial_delay"`
 	}
+
+	HostMetricsScrapers struct {
+		CPU        *CPUScraper        `yaml:"-" mapstructure:"cpu"`
+		Disk       *DiskScraper       `yaml:"-" mapstructure:"disk"`
+		Filesystem *FilesystemScraper `yaml:"-" mapstructure:"filesystem"`
+		Memory     *MemoryScraper     `yaml:"-" mapstructure:"memory"`
+		Network    *NetworkScraper    `yaml:"-" mapstructure:"network"`
+	}
+	CPUScraper        struct{}
+	DiskScraper       struct{}
+	FilesystemScraper struct{}
+	MemoryScraper     struct{}
+	NetworkScraper    struct{}
 
 	GRPC struct {
 		Target         string        `yaml:"-" mapstructure:"target"`
@@ -158,6 +203,17 @@ type (
 		SkipVerify bool   `yaml:"-" mapstructure:"skip_verify"`
 	}
 
+	// Specialized TLS configuration for OtlpReceiver with self-signed cert generation.
+	OtlpTLSConfig struct {
+		Cert                   string `yaml:"-" mapstructure:"cert"`
+		Key                    string `yaml:"-" mapstructure:"key"`
+		Ca                     string `yaml:"-" mapstructure:"ca"`
+		ServerName             string `yaml:"-" mapstructure:"server_name"`
+		ExistingCert           bool   `yaml:"-"`
+		SkipVerify             bool   `yaml:"-" mapstructure:"skip_verify"`
+		GenerateSelfSignedCert bool   `yaml:"-" mapstructure:"generate_self_signed_cert"`
+	}
+
 	File struct {
 		Location string `yaml:"-" mapstructure:"location"`
 	}
@@ -173,6 +229,7 @@ type (
 	Watchers struct {
 		InstanceWatcher       InstanceWatcher       `yaml:"-" mapstructure:"instance_watcher"`
 		InstanceHealthWatcher InstanceHealthWatcher `yaml:"-" mapstructure:"instance_health_watcher"`
+		FileWatcher           FileWatcher           `yaml:"-" mapstructure:"file_watcher"`
 	}
 
 	InstanceWatcher struct {
@@ -182,37 +239,46 @@ type (
 	InstanceHealthWatcher struct {
 		MonitoringFrequency time.Duration `yaml:"-" mapstructure:"monitoring_frequency"`
 	}
+
+	FileWatcher struct {
+		MonitoringFrequency time.Duration `yaml:"-" mapstructure:"monitoring_frequency"`
+	}
 )
 
 func (col *Collector) Validate(allowedDirectories []string) error {
+	var err error
 	cleaned := filepath.Clean(col.ConfigPath)
 
 	if !isAllowedDir(cleaned, allowedDirectories) {
-		return fmt.Errorf("collector path %s not allowed", col.ConfigPath)
+		err = errors.Join(err, fmt.Errorf("collector path %s not allowed", col.ConfigPath))
 	}
 
-	for _, exp := range col.Exporters {
-		t := strings.ToLower(exp.Type)
+	for _, nginxReceiver := range col.Receivers.NginxReceivers {
+		err = errors.Join(err, nginxReceiver.Validate(allowedDirectories))
+	}
 
-		if _, ok := supportedExporters[t]; !ok {
-			return fmt.Errorf("unsupported exporter type: %s", exp.Type)
+	return err
+}
+
+func (nr *NginxReceiver) Validate(allowedDirectories []string) error {
+	var err error
+	if _, uuidErr := uuid.Parse(nr.InstanceID); uuidErr != nil {
+		err = errors.Join(err, errors.New("invalid nginx receiver instance ID"))
+	}
+
+	for _, al := range nr.AccessLogs {
+		if !isAllowedDir(al.FilePath, allowedDirectories) {
+			err = errors.Join(err, fmt.Errorf("invalid nginx receiver access log path: %s", al.FilePath))
 		}
 
-		// normalize field too
-		exp.Type = t
-	}
-
-	for _, proc := range col.Processors {
-		t := strings.ToLower(proc.Type)
-
-		if _, ok := supportedProcessors[t]; !ok {
-			return fmt.Errorf("unsupported processor type: %s", proc.Type)
+		if len(al.FilePath) != 0 {
+			// The log format's double quotes must be escaped so that
+			// valid YAML is produced when executing the Go template.
+			al.LogFormat = strings.ReplaceAll(al.LogFormat, `"`, `\"`)
 		}
-
-		proc.Type = t
 	}
 
-	return nil
+	return err
 }
 
 func (c *Config) IsDirectoryAllowed(directory string) bool {

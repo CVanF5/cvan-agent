@@ -10,8 +10,8 @@ endif
 
 ifeq ($(CONTAINER_CLITOOL), docker)
 CONTAINER_BUILDENV ?= DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=plain
-ifeq ($(shell docker-compose -v >/dev/null 2>&1 || echo FAIL),)
-CONTAINER_COMPOSE = docker-compose
+ifeq ($(shell docker -v >/dev/null 2>&1 || echo FAIL),)
+CONTAINER_COMPOSE = docker compose
 endif
 else ifeq ($(CONTAINER_CLITOOL), podman)
 ifeq ($(shell podman-compose -v >/dev/null 2>&1 || echo FAIL),)
@@ -52,4 +52,6 @@ CONTAINER_REGISTRY = registry.access.redhat.com
 BASE_IMAGE = $(CONTAINER_REGISTRY)/ubi$(OS_VERSION)/ubi:latest
 endif
 
-CONTAINER_VARS = CONTAINER_CLITOOL CONTAINER_COMPOSE CONTAINER_BUILDENV CONTAINER_OS_TYPE CONTAINER_REGISTRY
+CONTAINER_NGINX_IMAGE_REGISTRY ?=  registry.nginx.com
+
+CONTAINER_VARS = CONTAINER_CLITOOL CONTAINER_COMPOSE CONTAINER_BUILDENV CONTAINER_OS_TYPE CONTAINER_REGISTRY CONTAINER_NGINX_IMAGE_REGISTRY

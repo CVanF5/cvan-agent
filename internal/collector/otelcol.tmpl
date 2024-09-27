@@ -4,30 +4,70 @@ receivers:
     collection_interval: {{ .Receivers.HostMetrics.CollectionInterval }}
     initial_delay: {{ .Receivers.HostMetrics.InitialDelay }}
     scrapers:
+      {{- if .Receivers.HostMetrics.Scrapers }}
+      {{- if .Receivers.HostMetrics.Scrapers.CPU }}
       cpu:
+      {{- end }}
+      {{- if .Receivers.HostMetrics.Scrapers.Disk }}
       disk:
-      load:
+      {{- end }}
+      {{- if .Receivers.HostMetrics.Scrapers.Filesystem }}
       filesystem:
+      {{- end }}
+      {{- if .Receivers.HostMetrics.Scrapers.Memory }}
       memory:
+      {{- end }}
+      {{- if .Receivers.HostMetrics.Scrapers.Network }}
       network:
-      paging:
-      processes:
-      process:
-{{- end }}
+      {{- end }}
+      {{- end }}
+{{- end }}  
 {{- range $index, $otlpReceiver := .Receivers.OtlpReceivers }}
   otlp/{{$index}}:
     protocols:
       {{- if eq .Server.Type 0 }}
       grpc:
+        endpoint: "{{ .Server.Host }}:{{ .Server.Port }}"
+        {{- if and .OtlpTLSConfig (or (gt (len .OtlpTLSConfig.Key) 0) (gt (len .OtlpTLSConfig.Cert) 0) (gt (len .OtlpTLSConfig.Key) 0)) }}
+        tls:
+          {{ if gt (len .OtlpTLSConfig.Cert) 0 -}}
+          cert_file: {{ .OtlpTLSConfig.Cert }}
+          {{- end }}
+          {{ if gt (len .OtlpTLSConfig.Key) 0 -}}
+          key_file: {{ .OtlpTLSConfig.Key }}
+          {{- end }}
+          {{ if gt (len .OtlpTLSConfig.Ca) 0 -}}
+          ca_file: {{ .OtlpTLSConfig.Ca }}
+          {{- end }}
+        {{- end }}
       {{- else }}
       http:
-      {{- end }}
         endpoint: "{{- .Server.Host -}}:{{- .Server.Port -}}"
+        {{- if .OtlpTLSConfig }}
+        tls:
+          {{ if gt (len .OtlpTLSConfig.Cert) 0 -}}
+          cert_file: {{ .OtlpTLSConfig.Cert }}
+          {{- end }}
+          {{ if gt (len .OtlpTLSConfig.Key) 0 -}}
+          key_file: {{ .OtlpTLSConfig.Key }}
+          {{- end }}
+          {{ if gt (len .OtlpTLSConfig.Ca) 0 -}}
+          ca_file: {{ .OtlpTLSConfig.Ca }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
 {{- end }}
 {{- range .Receivers.NginxReceivers }}
   nginx/{{- .InstanceID -}}:
     endpoint: "{{- .StubStatus -}}"
     collection_interval: 10s
+    {{- if gt (len .AccessLogs) 0 }}
+    access_logs:
+    {{- range .AccessLogs }}
+      - log_format: "{{- .LogFormat -}}"
+        file_path: "{{- .FilePath -}}"
+    {{- end }}
+    {{- end }}
 {{- end }}
 {{- range .Receivers.NginxPlusReceivers }}
   nginxplus/{{- .InstanceID -}}:
@@ -35,17 +75,17 @@ receivers:
     collection_interval: 10s
 {{- end }}
 
-{{ if gt (len .Processors) 0 -}}
 processors:
-{{- range .Processors }}
-  {{ .Type }}:
-{{- end }}
+{{- if ne .Processors.Batch nil }}
+  batch:
+    send_batch_size: {{ .Processors.Batch.SendBatchSize }}
+    timeout: {{ .Processors.Batch.Timeout }}
+    send_batch_max_size: {{ .Processors.Batch.SendBatchMaxSize }}
 {{- end }}
 
 exporters:
-{{- range .Exporters }}
-{{- if eq .Type "otlp" }}
-  otlp:
+{{- range $index, $otlpExporter := .Exporters.OtlpExporters }}
+  otlp/{{$index}}:
     endpoint: "{{ .Server.Host -}}:{{- .Server.Port }}"
     compression: none
     timeout: 10s
@@ -56,34 +96,55 @@ exporters:
       max_elapsed_time: 10m
     tls:
       insecure: {{ if .TLS -}}false{{ else -}}true{{- end }}
-      {{ if .TLS -}}
+      {{- if .TLS }}
       {{ if gt (len .TLS.Ca) 0 -}}ca_file: "{{- .TLS.Ca -}}"{{- end }}
       {{ if gt (len .TLS.Cert) 0 -}}cert_file: "{{- .TLS.Cert -}}"{{- end }}
       {{ if gt (len .TLS.Key) 0 -}}key_file: "{{- .TLS.Key -}}"{{- end }}
       {{- end }}
-{{- else if eq .Type "prometheus" }}
+{{- end }}
+{{- if ne .Exporters.PrometheusExporter nil }}
   prometheus:
-    endpoint: "{{ .Server.Host -}}:{{- .Server.Port }}"
-    namespace: "nginx-agent"
-{{- else if eq .Type "debug" }}
+    endpoint: "{{ .Exporters.PrometheusExporter.Server.Host -}}:{{- .Exporters.PrometheusExporter.Server.Port }}"
+{{- end }}
+{{- if ne .Exporters.Debug nil }}
   debug:
     verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
 {{- end }}
+
+{{- if ne .Extensions nil }}
+extensions:
+  {{- if ne .Extensions.Health nil }}
+  health_check:
+    endpoint: "{{ .Extensions.Health.Server.Host -}}:{{- .Extensions.Health.Server.Port }}"
+    {{- if ne .Extensions.Health.Path "" }}
+    path: "{{ .Extensions.Health.Path -}}"
+    {{- end }}
+    {{- if ne .Extensions.Health.TLS nil }}
+    tls: 
+       ca_cert: "{{ .Extensions.Health.Server.TLS.Ca -}}"
+       cert_file: "{{ .Extensions.Health.Server.TLS.Cert -}}"
+       key_file: "{{ .Extensions.Health.Server.TLS.Key -}}"
+    {{- end }}
+  {{- end }}
 {{- end }}
 
-extensions:
-  health_check:
-    {{- if .Health }}
-    endpoint: "{{ .Health.Host -}}:{{- .Health.Port }}"
-    {{- else }}
-    endpoint: "localhost:13133"
-    {{- end }}
-
 service:
+  {{- if .Log.Path}}
+  telemetry:
+    logs:
+      level: {{ .Log.Level }}
+      output_paths: ["{{ .Log.Path -}}"]
+      error_output_paths: ["{{ .Log.Path -}}"]
+  {{- end}}
+  
+  {{- if ne .Extensions nil }}
   extensions:
+    {{- if ne .Extensions.Health nil }}
     - health_check
+    {{- end}}
+  {{- end}}
   pipelines:
     metrics:
       receivers:
@@ -100,8 +161,16 @@ service:
         - nginxplus/{{- .InstanceID -}}
         {{- end }}
       processors:
+        {{- if ne .Processors.Batch nil }}
         - batch
-      exporters:
-        {{- range .Exporters }}
-        - {{ .Type }}
         {{- end }}
+      exporters:
+        {{- range $index, $otlpExporter := .Exporters.OtlpExporters }}
+        - otlp/{{$index}}
+        {{- end }}
+        {{- if ne .Exporters.PrometheusExporter nil }}
+        - prometheus
+        {{- end }}
+        {{- if ne .Exporters.Debug nil }}
+        - debug
+        {{- end  }}

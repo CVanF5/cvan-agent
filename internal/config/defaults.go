@@ -5,6 +5,7 @@
 package config
 
 import (
+	"math"
 	"time"
 )
 
@@ -14,7 +15,14 @@ const (
 	DefTreatErrorsAsWarnings       = true
 	DefUseSyslog                   = false
 
-	DefCollectorConfigPath = "/var/run/nginx-agent/otelcol.yaml"
+	DefCollectorConfigPath  = "/etc/nginx-agent/opentelemetry-collector-agent.yaml"
+	DefCollectorLogLevel    = "INFO"
+	DefCollectorLogPath     = "/var/log/nginx-agent/opentelemetry-collector-agent.log"
+	DefConfigDirectories    = "/etc/nginx:/usr/local/etc/nginx:/usr/share/nginx/modules"
+	DefCollectorTLSCertPath = "/var/lib/nginx-agent/cert.pem"
+	DefCollectorTLSKeyPath  = "/var/lib/nginx-agent/key.pem"
+	DefCollectorTLSCAPath   = "/var/lib/nginx-agent/ca.pem"
+	DefCollectorTLSSANNames = "127.0.0.1,::1,localhost"
 
 	DefCommandServerHostKey    = ""
 	DefCommandServerPortKey    = 0
@@ -34,4 +42,16 @@ const (
 
 	DefInstanceWatcherMonitoringFrequency       = 5 * time.Second
 	DefInstanceHealthWatcherMonitoringFrequency = 5 * time.Second
+	DefFileWatcherMonitoringFrequency           = 5 * time.Second
+
+	// 0 = unset
+	DefMaxMessageSize = 0
+	// default 4 MB
+	DefMaxMessageRecieveSize = 4194304
+	// math.MaxInt32
+	DefMaxMessageSendSize = math.MaxInt32
+
+	DefCollectorBatchProcessorSendBatchSize    = 8192
+	DefCollectorBatchProcessorSendBatchMaxSize = 0
+	DefCollectorBatchProcessorTimeout          = 200 * time.Millisecond
 )
