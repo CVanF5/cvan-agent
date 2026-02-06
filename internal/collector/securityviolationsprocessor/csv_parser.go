@@ -13,6 +13,8 @@ import (
 	events "github.com/nginx/agent/v3/api/grpc/events/v1"
 )
 
+const expectedFieldCount = 33 // Expected number of fields in log parsing
+
 // Mapping of CSV field positions to their corresponding keys
 var fieldOrder = []string{
 	"blocking_exception_reason",
@@ -56,7 +58,7 @@ var fieldOrder = []string{
 //
 //nolint:lll //long test string kept for log profile readability
 func parseCSVLog(message string) map[string]string {
-	fieldValueMap := make(map[string]string, 33)
+	fieldValueMap := make(map[string]string, expectedFieldCount)
 
 	// Remove the "ASM:" prefix if present so we only process the values
 	message = strings.TrimPrefix(message, "ASM:")
@@ -175,6 +177,7 @@ func parseUint32(value string) uint32 {
 	if val, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32); err == nil {
 		return uint32(val)
 	}
+
 	return 0
 }
 

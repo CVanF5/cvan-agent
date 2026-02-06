@@ -404,7 +404,10 @@ func (p *securityViolationsProcessor) decodeStringOrWarn(encoded, context, field
 	decoded, err := p.tryDecodeBase64(encoded)
 	if err != nil {
 		p.settings.Logger.Warn("Failed to decode context field",
-			zap.String("context", context), zap.String("field_type", fieldType), zap.String("value", encoded), zap.Error(err))
+			zap.String("context", context),
+			zap.String("field_type", fieldType),
+			zap.String("value", encoded),
+			zap.Error(err))
 
 		return encoded
 	}
@@ -425,7 +428,7 @@ func (p *securityViolationsProcessor) extractSignaturesFromXML(v *Violation) []*
 		bufferStr := s.KwData.Buffer // Default to base64 string
 		if err == nil {
 			// Only use decoded buffer if it's valid UTF-8 and doesn't contain null bytes
-			if utf8.ValidString(string(buf)) && isValidProtobufString(buf) {
+			if utf8.Valid(buf) && isValidProtobufString(buf) {
 				bufferStr = string(buf)
 			}
 		}

@@ -161,7 +161,7 @@ func (p *securityViolationsProcessor) processAppProtectMessage(lr plog.LogRecord
 
 	// OTel Event Compliance
 	lr.SetEventName("security.app_protect.violation")
-	lr.SetSeverityNumber(p.mapToOTelSeverity(appProtectLog.Severity))
+	lr.SetSeverityNumber(p.mapToOTelSeverity(appProtectLog.GetSeverity()))
 
 	// Human-readable string body
 	body := p.buildStructuredBody(appProtectLog)
@@ -259,120 +259,197 @@ func (p *securityViolationsProcessor) mapToOTelSeverity(napSeverity events.Sever
 func (p *securityViolationsProcessor) buildStructuredBody(event *events.SecurityViolationEvent) string {
 	var body strings.Builder
 
-	// Primary violation summary
-	body.WriteString(fmt.Sprintf("NGINX App Protect %s: %s\n",
-		event.RequestStatus.String(),
-		strings.TrimSpace(event.GetViolations())))
+	p.buildViolationSummary(&body, event)
+	p.buildPolicyAndHTTPInfo(&body, event)
+	p.buildSecurityDetails(&body, event)
+	p.buildViolationDetails(&body, event)
+	p.buildViolationKeywords(&body, event)
+	p.buildSystemInfo(&body, event)
 
+	return strings.TrimSpace(body.String())
+}
+
+// buildViolationSummary adds the primary violation summary
+func (p *securityViolationsProcessor) buildViolationSummary(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
+	fmt.Fprintf(body, "NGINX App Protect %s: %s\n",
+		event.GetRequestStatus().String(),
+		strings.TrimSpace(event.GetViolations()))
+}
+
+// buildPolicyAndHTTPInfo adds policy and HTTP request details
+func (p *securityViolationsProcessor) buildPolicyAndHTTPInfo(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
 	// Policy information
-	body.WriteString(fmt.Sprintf("Policy: %s | Support ID: %s\n",
+	fmt.Fprintf(body, "Policy: %s | Support ID: %s\n",
 		event.GetPolicyName(),
-		event.GetSupportId()))
+		event.GetSupportId())
 
 	// HTTP Request details
-	body.WriteString(fmt.Sprintf("HTTP: %s %s -> %d\n",
+	fmt.Fprintf(body, "HTTP: %s %s -> %d\n",
 		event.GetMethod(),
 		event.GetUri(),
-		event.GetResponseCode()))
+		event.GetResponseCode())
 
 	// Network details
-	body.WriteString(fmt.Sprintf("Client: %s:%d -> Server: %s:%d\n",
+	fmt.Fprintf(body, "Client: %s:%d -> Server: %s:%d\n",
 		event.GetRemoteAddr(),
 		event.GetDestinationPort(),
 		event.GetServerAddr(),
-		event.GetServerPort()))
+		event.GetServerPort())
+}
 
-	// Security details
+// buildSecurityDetails adds security-related information
+func (p *securityViolationsProcessor) buildSecurityDetails(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
 	if event.GetViolationRating() > 0 {
-		body.WriteString(fmt.Sprintf("Rating: %d\n", event.GetViolationRating()))
+		fmt.Fprintf(body, "Rating: %d\n", event.GetViolationRating())
 	}
 	if event.GetSigSetNames() != "" {
-		body.WriteString(fmt.Sprintf("Signatures: %s\n", event.GetSigSetNames()))
+		fmt.Fprintf(body, "Signatures: %s\n", event.GetSigSetNames())
 	}
 	if event.GetSigCves() != "" {
-		body.WriteString(fmt.Sprintf("CVEs: %s\n", event.GetSigCves()))
+		fmt.Fprintf(body, "CVEs: %s\n", event.GetSigCves())
 	}
 	if event.GetBotCategory() != "" {
-		body.WriteString(fmt.Sprintf("Bot: %s\n", event.GetBotCategory()))
+		fmt.Fprintf(body, "Bot: %s\n", event.GetBotCategory())
 	}
 
 	// Additional context
 	if event.GetSubViolations() != "" {
-		body.WriteString(fmt.Sprintf("Sub-violations: %s\n", event.GetSubViolations()))
+		fmt.Fprintf(body, "Sub-violations: %s\n", event.GetSubViolations())
 	}
 	if event.GetThreatCampaignNames() != "" {
-		body.WriteString(fmt.Sprintf("Threat campaigns: %s\n", event.GetThreatCampaignNames()))
+		fmt.Fprintf(body, "Threat campaigns: %s\n", event.GetThreatCampaignNames())
 	}
 	if event.GetXffHeaderValue() != "" {
-		body.WriteString(fmt.Sprintf("X-Forwarded-For: %s\n", event.GetXffHeaderValue()))
+		fmt.Fprintf(body, "X-Forwarded-For: %s\n", event.GetXffHeaderValue())
 	} else {
 		body.WriteString("X-Forwarded-For: N/A\n")
 	}
+}
 
-	// Detailed violations information - include specific violation names and contexts
-	if len(event.GetViolationsData()) > 0 {
-		body.WriteString("Violations Details:\n")
-		for _, violation := range event.GetViolationsData() {
-			violationName := violation.GetViolationDataName()
-			context := violation.GetViolationDataContext()
-			
-			// Include violation name for test validation  
-			body.WriteString(fmt.Sprintf("  - %s", violationName))
-			
-			// Add context information if available
-			if context != "" {
-				body.WriteString(fmt.Sprintf(" (%s)", context))
-			}
-			
-			// Add context data if available
-			if contextData := violation.GetViolationDataContextData(); contextData != nil {
-				if contextData.GetContextDataName() != "" {
-					body.WriteString(fmt.Sprintf(" [%s]", contextData.GetContextDataName()))
-				}
-				if contextData.GetContextDataValue() != "" {
-					body.WriteString(fmt.Sprintf(" = %s", contextData.GetContextDataValue()))
-				}
-			}
-			body.WriteString("\n")
-		}
+// buildViolationDetails adds detailed violations information
+func (p *securityViolationsProcessor) buildViolationDetails(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
+	if len(event.GetViolationsData()) == 0 {
+		return
 	}
 
-	// Add context-specific information for test validation
+	body.WriteString("Violations Details:\n")
 	for _, violation := range event.GetViolationsData() {
-		context := violation.GetViolationDataContext()
 		violationName := violation.GetViolationDataName()
-		
-		// Add keywords that tests expect
-		if strings.Contains(violationName, "COOKIE") {
-			body.WriteString("Cookie violations detected\n")
+		violationContext := violation.GetViolationDataContext()
+
+		// Include violation name for test validation
+		body.WriteString("  - " + violationName)
+
+		// Add context information if available
+		if violationContext != "" {
+			fmt.Fprintf(body, " (%s)", violationContext)
 		}
-		if strings.Contains(violationName, "HEADER") || context == "header" {
-			body.WriteString("Header violations detected\n")
-			if violation.GetViolationDataContextData() != nil {
-				headerName := violation.GetViolationDataContextData().GetContextDataName()
-				if headerName != "" {
-					body.WriteString(fmt.Sprintf("Header: %s\n", headerName))
-				}
+
+		// Add context data if available
+		if contextData := violation.GetViolationDataContextData(); contextData != nil {
+			if contextData.GetContextDataName() != "" {
+				fmt.Fprintf(body, " [%s]", contextData.GetContextDataName())
+			}
+			if contextData.GetContextDataValue() != "" {
+				body.WriteString(" = " + contextData.GetContextDataValue())
 			}
 		}
-		if strings.Contains(violationName, "URL") {
-			body.WriteString("URL violations detected\n")
-		}
-		if strings.Contains(violationName, "LENGTH") {
-			body.WriteString("Length violation detected\n")
-		}
-		if strings.Contains(violationName, "CONTENT") || strings.Contains(violationName, "CONTENT_TYPE") {
-			body.WriteString("Content violation detected\n")
-		}
-		if context == "request" {
-			body.WriteString("Request context violations\n")
+		body.WriteString("\n")
+	}
+}
+
+// buildViolationKeywords adds context-specific keywords for test validation
+func (p *securityViolationsProcessor) buildViolationKeywords(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
+	for _, violation := range event.GetViolationsData() {
+		p.addViolationTypeKeywords(body, violation)
+	}
+}
+
+// addViolationTypeKeywords adds specific violation type keywords
+func (p *securityViolationsProcessor) addViolationTypeKeywords(
+	body *strings.Builder,
+	violation *events.ViolationData,
+) {
+	violationContext := violation.GetViolationDataContext()
+	violationName := violation.GetViolationDataName()
+
+	p.addCookieKeywords(body, violationName)
+	p.addHeaderKeywords(body, violationName, violationContext, violation)
+	p.addURLKeywords(body, violationName)
+	p.addContentKeywords(body, violationName)
+	p.addRequestKeywords(body, violationContext)
+}
+
+// addCookieKeywords adds cookie-related keywords
+func (p *securityViolationsProcessor) addCookieKeywords(body *strings.Builder, violationName string) {
+	if strings.Contains(violationName, "COOKIE") {
+		body.WriteString("Cookie violations detected\n")
+	}
+}
+
+// addHeaderKeywords adds header-related keywords
+func (p *securityViolationsProcessor) addHeaderKeywords(
+	body *strings.Builder,
+	violationName string,
+	violationContext string,
+	violation *events.ViolationData,
+) {
+	if strings.Contains(violationName, "HEADER") || violationContext == "header" {
+		body.WriteString("Header violations detected\n")
+		if violation.GetViolationDataContextData() != nil {
+			headerName := violation.GetViolationDataContextData().GetContextDataName()
+			if headerName != "" {
+				fmt.Fprintf(body, "Header: %s\n", headerName)
+			}
 		}
 	}
+}
 
-	// System context
-	body.WriteString(fmt.Sprintf("System: %s | VS: %s\n",
+// addURLKeywords adds URL-related keywords
+func (p *securityViolationsProcessor) addURLKeywords(body *strings.Builder, violationName string) {
+	if strings.Contains(violationName, "URL") {
+		body.WriteString("URL violations detected\n")
+	}
+	if strings.Contains(violationName, "LENGTH") {
+		body.WriteString("Length violation detected\n")
+	}
+}
+
+// addContentKeywords adds content-related keywords
+func (p *securityViolationsProcessor) addContentKeywords(body *strings.Builder, violationName string) {
+	if strings.Contains(violationName, "CONTENT") || strings.Contains(violationName, "CONTENT_TYPE") {
+		body.WriteString("Content violation detected\n")
+	}
+}
+
+// addRequestKeywords adds request context keywords
+func (p *securityViolationsProcessor) addRequestKeywords(body *strings.Builder, violationContext string) {
+	if violationContext == "request" {
+		body.WriteString("Request context violations\n")
+	}
+}
+
+// buildSystemInfo adds system context information
+func (p *securityViolationsProcessor) buildSystemInfo(
+	body *strings.Builder,
+	event *events.SecurityViolationEvent,
+) {
+	fmt.Fprintf(body, "System: %s | VS: %s\n",
 		event.GetSystemId(),
-		event.GetVsName()))
-
-	return strings.TrimSpace(body.String())
+		event.GetVsName())
 }

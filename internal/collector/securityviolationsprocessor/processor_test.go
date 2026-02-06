@@ -42,45 +42,45 @@ func loadRawTestData(t *testing.T, filename string) string {
 // validateEvent validates the security violation event in the new OTel-compliant format
 func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolationEvent {
 	t.Helper()
-	
+
 	// Validate OTel event structure
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate body is human-readable string (not binary)
 	body := lrOut.Body().Str()
 	assert.NotEmpty(t, body)
 	assert.Contains(t, body, "NGINX App Protect")
-	
+
 	// Validate essential attributes are present
 	attrs := lrOut.Attributes()
 	policyName, exists := attrs.Get("app_protect.policy_name")
 	assert.True(t, exists, "policy_name attribute should exist")
 	assert.NotEmpty(t, policyName.Str(), "policy_name should not be empty")
-	
+
 	supportId, exists := attrs.Get("app_protect.support_id")
 	assert.True(t, exists, "support_id attribute should exist")
 	assert.NotEmpty(t, supportId.Str(), "support_id should not be empty")
-	
+
 	outcome, exists := attrs.Get("app_protect.outcome")
 	assert.True(t, exists, "outcome attribute should exist")
 	assert.NotEmpty(t, outcome.Str(), "outcome should not be empty")
-	
+
 	remoteAddr, exists := attrs.Get("app_protect.remote_addr")
 	assert.True(t, exists, "remote_addr attribute should exist")
 	assert.NotEmpty(t, remoteAddr.Str(), "remote_addr should not be empty")
-	
+
 	// For testing purposes, rebuild a minimal SecurityViolationEvent from essential attributes only
 	// This allows the existing test assertions to continue working with our compromise approach
 	event := &events.SecurityViolationEvent{
-		PolicyName:      policyName.Str(),
-		SupportId:       supportId.Str(), // Support_id is now stored as string
-		RemoteAddr:      remoteAddr.Str(),
+		PolicyName: policyName.Str(),
+		SupportId:  supportId.Str(), // Support_id is now stored as string
+		RemoteAddr: remoteAddr.Str(),
 		// Note: With compromise approach, we don't parse all detailed fields into attributes
 		// They are available in the string body for the final consumer to parse if needed
 	}
-	
+
 	// Parse outcome
 	switch outcome.Str() {
 	case "REQUEST_OUTCOME_REJECTED":
@@ -90,14 +90,14 @@ func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolation
 	default:
 		event.RequestOutcome = events.RequestOutcome_REQUEST_OUTCOME_UNKNOWN
 	}
-	
+
 	// Get violation rating if present
-	if rating, exists := attrs.Get("app_protect.violation_rating"); exists {
+	if rating, ratingExists := attrs.Get("app_protect.violation_rating"); ratingExists {
 		event.ViolationRating = uint32(rating.Int())
 	} else {
 		event.ViolationRating = 0
 	}
-	
+
 	return event
 }
 
@@ -108,7 +108,7 @@ func unmarshalEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolatio
 	if lrOut.Body().Type() == pcommon.ValueTypeStr {
 		return validateEvent(t, lrOut)
 	}
-	
+
 	// Legacy protobuf format handling
 	processedBody := lrOut.Body().Bytes().AsRaw()
 
@@ -460,7 +460,7 @@ func TestSecurityViolationsProcessor(t *testing.T) {
 			for k, v := range tc.expectAttrs {
 				val, ok := lrOut.Attributes().Get(k)
 				assert.True(t, ok, "attribute %s missing %v", k, v)
-				
+
 				// All essential attributes are now stored as strings
 				assert.Equal(t, v, val.Str())
 			}
@@ -474,6 +474,7 @@ func TestSecurityViolationsProcessor(t *testing.T) {
 	}
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest1Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -482,29 +483,29 @@ func assertTest1Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate body contains expected information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
 	assert.Contains(t, body, "BLOCKED")
-	
+
 	// Validate essential attributes
 	assert.Equal(t, "nms_app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "5377540117854870581", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "127.0.0.1", actualEvent.GetRemoteAddr())
 	assert.Equal(t, uint32(5), actualEvent.GetViolationRating())
-	
+
 	// Validate the actual attributes stored (support_id is now string)
 	attrs := lrOut.Attributes()
 	supportIdAttr, exists := attrs.Get("app_protect.support_id")
 	assert.True(t, exists)
 	assert.Equal(t, "5377540117854870581", supportIdAttr.Str())
-	
+
 	// Note: With the compromise approach, detailed fields are in the string body
 	// not as individual attributes. The full data is still available for the
 	// final consumer to parse, but intermediate hops only see essential attributes.
-	
+
 	// Validate that detailed data is available in string body
 	body = lrOut.Body().Str()
 	assert.Contains(t, body, "Attack signature detected", "Body should contain violation details")
@@ -516,21 +517,22 @@ func assertTest1Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "Signatures:", "Body should mention signatures")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest2Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
-	
+
 	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes only (compromise approach)
 	assert.Equal(t, "security_policy_01", actualEvent.GetPolicyName())
 	assert.Equal(t, "9876543210123456789", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "10.0.1.50", actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains expected information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -540,27 +542,28 @@ func assertTest2Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "10.0.1.50", "Body should contain client IP")
 	assert.Contains(t, body, "Attack signature detected", "Body should contain violation summary")
 	assert.Contains(t, body, "SQL Injection", "Body should contain signature type")
-	
+
 	// Note: In compromise approach, detailed signature data and other fields are in the body
 	// but not parsed into individual attributes for performance reasons
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest6Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
-	
+
 	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes only (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592519", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "127.0.0.1", actualEvent.GetRemoteAddr())
-	
-	// Validate body contains expected information  
+
+	// Validate body contains expected information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
 	assert.Contains(t, body, "app_protect_default_policy")
@@ -568,25 +571,27 @@ func assertTest6Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "HTTP", "Body should contain protocol")
 	assert.Contains(t, body, "127.0.0.1", "Body should contain client IP")
 	assert.Contains(t, body, "VIOL_ASM_COOKIE_MODIFIED", "Body should contain violation details")
-	
+
 	// Note: In compromise approach, detailed cookie data and other fields are in the body
 	// but not parsed into individual attributes for performance reasons
 }
+
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest7Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
-	
+
 	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592517", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -597,25 +602,26 @@ func assertTest7Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "HTTP protocol compliance", "Body should contain violation summary")
 	assert.Contains(t, body, "meta character", "Body should contain violation details")
-	
+
 	// Note: Parameter violation details are embedded in human-readable body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest8Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
-	
+
 	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592516", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -626,25 +632,26 @@ func assertTest8Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "meta character", "Body should contain violation type")
 	assert.Contains(t, body, "Referer", "Body should contain header violation details")
-	
+
 	// Note: Base64 decoded text and metachar details are embedded in the body for consumers
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest9Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
-	
+
 	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592514", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -655,10 +662,11 @@ func assertTest9Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "length", "Body should contain violation type")
 	assert.Contains(t, body, "Cookie", "Body should contain cookie violation details")
-	
+
 	// Note: Specific cookie length values (28, 10) are embedded in the body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest10Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -667,13 +675,13 @@ func assertTest10Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592515", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -684,10 +692,11 @@ func assertTest10Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "length", "Body should contain violation type")
 	assert.Contains(t, body, "Header", "Body should contain header violation details")
-	
+
 	// Note: Specific length values (42, 10) are embedded in the body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest11Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -696,13 +705,13 @@ func assertTest11Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592517", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -713,10 +722,11 @@ func assertTest11Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "Content", "Body should contain violation type")
 	assert.Contains(t, body, "URL", "Body should contain context type")
-	
+
 	// Note: HeaderData with matched/actual values are embedded in the body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest12Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -725,13 +735,13 @@ func assertTest12Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592511", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -742,10 +752,11 @@ func assertTest12Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "meta character", "Body should contain parameter violations")
 	assert.Contains(t, body, "Attack signature", "Body should contain attack detection")
-	
+
 	// Note: Multiple parameter violations are embedded in the body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest13Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -754,13 +765,13 @@ func assertTest13Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592512", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -771,10 +782,11 @@ func assertTest13Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "length", "Body should contain length violation details")
 	assert.Contains(t, body, "Request", "Body should contain request context")
-	
+
 	// Note: Specific length values (detected, defined, total) are embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest14Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -783,13 +795,13 @@ func assertTest14Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592513", actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -801,10 +813,11 @@ func assertTest14Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "meta character", "Body should contain URL metachar violation")
 	assert.Contains(t, body, "length", "Body should contain URL length violation")
 	assert.Contains(t, body, "URL", "Body should contain context type")
-	
+
 	// Note: URI details (base64 or decoded) and length values are embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest15Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -813,13 +826,13 @@ func assertTest15Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -827,10 +840,11 @@ func assertTest15Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "Attack signature", "Body should contain attack signatures")
 	assert.Contains(t, body, "meta character", "Body should contain parameter violations")
-	
+
 	// Note: Detailed violation arrays and signature data are embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest16Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -839,13 +853,13 @@ func assertTest16Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -853,10 +867,11 @@ func assertTest16Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "Attack signature", "Body should contain attack signature")
 	assert.Contains(t, body, "Header", "Body should contain header context")
-	
+
 	// Note: Header signature data is embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest17Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -865,13 +880,13 @@ func assertTest17Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -879,10 +894,11 @@ func assertTest17Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "Attack signature", "Body should contain attack signature")
 	assert.Contains(t, body, "Signatures", "Body should contain signature details")
-	
+
 	// Note: Multiple signature data is embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest18Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -891,23 +907,24 @@ func assertTest18Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
 	assert.Contains(t, body, "app_protect_default_policy")
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "Cookie", "Body should contain cookie violation")
-	
+
 	// Note: Cookie malformed details are embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest19Event(t *testing.T, record plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, record)
@@ -916,13 +933,13 @@ func assertTest19Event(t *testing.T, record plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", record.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, record.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, record.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains violation information
 	body := record.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -930,10 +947,11 @@ func assertTest19Event(t *testing.T, record plog.LogRecord) {
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
 	assert.Contains(t, body, "HTTP protocol", "Body should contain protocol violation")
 	assert.Contains(t, body, "Content-Type", "Body should contain header details")
-	
+
 	// Note: Default context and HeaderData details are embedded in body text
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest20Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -942,14 +960,14 @@ func assertTest20Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
-	// Test 20 has no expected support_id, accept whatever comes from actual data  
+	// Test 20 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all cookie violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -961,22 +979,23 @@ func assertTest20Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "cookie", "Body should contain cookie context")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest21Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
 
-	// Validate OTel compliance  
+	// Validate OTel compliance
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	// Test 21 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all URL violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -989,6 +1008,7 @@ func assertTest21Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "VIOL_URL", "Body should contain URL violation types")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest22Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -997,14 +1017,14 @@ func assertTest22Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	// Test 22 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all request violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -1017,6 +1037,7 @@ func assertTest22Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "VIOL_REQUEST", "Body should contain request violations")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest23Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1028,17 +1049,18 @@ func assertTest23Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (should parse from CSV even with bad XML)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
-	assert.Equal(t, "5543056874564592513", actualEvent.GetSupportId())  // From expectAttrs
+	assert.Equal(t, "5543056874564592513", actualEvent.GetSupportId()) // From expectAttrs
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Should have empty violations due to malformed XML
 	assert.Empty(t, actualEvent.GetViolationsData(), "Malformed XML should result in empty violations_data")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest24Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1053,6 +1075,7 @@ func assertTest24Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "4355056874564592516", actualEvent.GetSupportId())
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest25Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1061,11 +1084,11 @@ func assertTest25Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
+
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
-	assert.Equal(t, "4355056874564592511", actualEvent.GetSupportId())  // Matches test expectAttrs
-	
+	assert.Equal(t, "4355056874564592511", actualEvent.GetSupportId()) // Matches test expectAttrs
+
 	// Validate body contains all header violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
@@ -1078,6 +1101,7 @@ func assertTest25Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "VIOL_HEADER", "Body should contain header violations")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest26Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1089,6 +1113,7 @@ func assertTest26Event(t *testing.T, lrOut plog.LogRecord) {
 	// Violations data may be empty or minimal since XML structure is unmatched
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest27Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1099,6 +1124,7 @@ func assertTest27Event(t *testing.T, lrOut plog.LogRecord) {
 	// Should still parse violations successfully
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest28Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1109,6 +1135,7 @@ func assertTest28Event(t *testing.T, lrOut plog.LogRecord) {
 	// Should still parse violations successfully, ignoring extra field
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest29Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1116,7 +1143,7 @@ func assertTest29Event(t *testing.T, lrOut plog.LogRecord) {
 	// uri_request_contain_escaped_comma.log.txt has %2C (escaped comma) in URI and request
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592513", actualEvent.GetSupportId())
-	
+
 	// In compromise approach, URI and Request data are in the body, not as parsed fields
 	// Validate body contains URI and request information with escaped commas
 	body := lrOut.Body().Str()
@@ -1126,12 +1153,13 @@ func assertTest29Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Contains(t, body, "GET", "Body should contain HTTP method")
 	assert.Contains(t, body, "HTTP", "Body should contain protocol")
 	assert.Contains(t, body, "BLOCKED", "Body should contain request status")
-	
+
 	// Test expects escaped commas in URI and request content
 	assert.Contains(t, body, "comma", "Body should contain 'comma' from URI")
 	assert.Contains(t, body, "%2C", "Body should contain escaped comma from request")
 }
 
+//nolint:dupl // test functions intentionally follow similar validation patterns
 func assertTest30Event(t *testing.T, lrOut plog.LogRecord) {
 	t.Helper()
 	actualEvent := unmarshalEvent(t, lrOut)
@@ -1140,13 +1168,13 @@ func assertTest30Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "security.app_protect.violation", lrOut.EventName())
 	assert.NotEqual(t, plog.SeverityNumberUnspecified, lrOut.SeverityNumber())
 	assert.Equal(t, pcommon.ValueTypeStr, lrOut.Body().Type())
-	
-	// Validate essential attributes (compromise approach)  
+
+	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
 	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
-	
+
 	// Validate body contains all violation information
 	body := lrOut.Body().Str()
 	assert.Contains(t, body, "NGINX App Protect")
