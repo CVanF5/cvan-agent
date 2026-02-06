@@ -2,20 +2,20 @@
 
 ## Introduction
 
-The Security Violations Processor is a custom OpenTelemetry Collector processor designed to ingest, parse, and transform NGINX App Protect (NAP) WAF violation events into structured protobuf messages. This processor enables real-time security monitoring and analysis of web application attacks by consuming syslog messages from NAP v4 & v5, and converts them into a standardized `SecurityViolationEvent` protobuf format. This protobuf payload is then encoded as bytes, and forwarded as a log record.
+The Security Violations Processor is a custom OpenTelemetry Collector processor designed to ingest, parse, and transform NGINX App Protect (NAP) WAF violation events into OTel-compliant structured events. This processor enables real-time security monitoring and analysis of web application attacks by consuming syslog messages from NAP v4 & v5, and converts them into standardized OpenTelemetry log events with essential attributes and human-readable structured body content.
 
 ### Purpose
 
 NGINX App Protect generates security violation events over syslog. While syslog is universally supported and easy to configure, text-based formats are inefficient for machine processing at scale: they require string parsing, have no type safety, consume significant bandwidth, and lack native support for complex nested structures like violation details with multiple signature matches.
 
-This processor exists to transform these text-formatted syslog messages into **structured, efficiently encoded protobuf messages** that are optimized for programmatic consumption.
+This processor exists to transform these text-formatted syslog messages into **OTel-compliant structured events** that are optimized for observability pipelines and multi-hop processing environments.
 
 Downstream consumers benefit from:
-- **Shared versioned contract**: The `SecurityViolationEvent` protobuf schema serves as a strongly-typed API contract between NAP and consuming systems, with built-in backwards compatibility.
-- **Efficient binary encoding**: Protobuf's compact binary format significantly reduces bandwidth and storage costs compared to text-based formats
-- **Zero parsing overhead**: Pre-structured data eliminates the need for regex parsing, string splitting, or JSON deserialization in downstream systems
-- **Language-agnostic integration**: Automatic code generation for 10+ languages (Go, Python, Java, etc.) means consumers can work with native data structures
-- **Type safety**: Strongly-typed fields (enums, repeated fields, nested messages) prevent runtime errors and enable compile-time validation
+- **OpenTelemetry compliance**: Full compatibility with OTel semantic conventions and standard observability tooling
+- **Multi-hop pipeline efficiency**: Optimized for processing through complex observability infrastructure without performance penalties
+- **Essential attributes extraction**: Key violation data (policy, support_id, outcome, remote_addr, rating) provided as structured attributes
+- **Human-readable structured body**: Complete violation details in a structured, searchable format that maintains full data fidelity
+- **Standard OTel tooling support**: Compatible with all OpenTelemetry processors, exporters, and observability platforms
 
 ### Architecture Context
 
@@ -23,7 +23,7 @@ The processor operates within the NGINX Agent's OpenTelemetry Collector pipeline
 
 ```
 NGINX App Protect v4/v5 → Syslog/UDP → Security Violations Processor → Batch Processor → OTLP Exporter
-    (localhost/docker0)      (:1514)            (Protobuf)                                   (Logs)
+    (localhost/docker0)      (:1514)        (OTel Events)                                  (Logs)
 ```
 
 **Key Components:**
@@ -32,7 +32,7 @@ NGINX App Protect v4/v5 → Syslog/UDP → Security Violations Processor → Bat
     - **NAP v4**: Configured to send to `127.0.0.1:1514` (localhost)
     - **NAP v5**: Configured to send to docker0 interface IP (e.g., `172.17.0.1:1514` or dynamically discovered)
 - **Security Violations Processor**: Custom OTel processor that parses and transforms events
-- **Protobuf Schema**: Defines the canonical `SecurityViolationEvent` message format
+- **Native Go Types**: Defines the canonical data structures for security violation events
 - **Exporters**: Forward structured events to observability backends
 
 ## Architecture
@@ -78,7 +78,7 @@ NGINX App Protect v4/v5 → Syslog/UDP → Security Violations Processor → Bat
 │  │  │ 1. Extract syslog structured data (hostname, priority)  ││   │
 │  │  │ 2. Parse CSV body in log profile field order            ││   │
 │  │  │ 3. Extract XML violation, signatures and context details││   │
-│  │  │ 4. Map fields to SecurityViolationEvent protobuf        ││   │
+│  │  │ 4. Map fields to OTel event with structured body           ││   │
 │  │  │ 5. Add resource attributes (system_id, nginx.id)        ││   │
 │  │  └─────────────────────────────────────────────────────────┘│   │
 │  └─────────────────────────────────────────────────────────────┘   │

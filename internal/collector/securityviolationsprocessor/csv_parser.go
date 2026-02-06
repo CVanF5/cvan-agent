@@ -9,8 +9,6 @@ import (
 	"encoding/csv"
 	"strconv"
 	"strings"
-
-	events "github.com/nginx/agent/v3/api/grpc/events/v1"
 )
 
 const expectedFieldCount = 33 // Expected number of fields in log parsing
@@ -99,14 +97,14 @@ func parseCSVLog(message string) map[string]string {
 }
 
 // parseOutcome converts string outcome to RequestOutcome enum
-func parseOutcome(outcome string) events.RequestOutcome {
+func parseOutcome(outcome string) RequestOutcome {
 	switch strings.ToLower(strings.TrimSpace(outcome)) {
 	case "passed":
-		return events.RequestOutcome_REQUEST_OUTCOME_PASSED
+		return RequestOutcomePassed
 	case "rejected":
-		return events.RequestOutcome_REQUEST_OUTCOME_REJECTED
+		return RequestOutcomeRejected
 	default:
-		return events.RequestOutcome_REQUEST_OUTCOME_UNKNOWN
+		return RequestOutcomeUnknown
 	}
 }
 
@@ -121,54 +119,54 @@ func parseIsTruncated(value string) bool {
 }
 
 // parseSeverity converts string severity to Severity enum
-func parseSeverity(severity string) events.Severity {
+func parseSeverity(severity string) Severity {
 	switch strings.ToLower(strings.TrimSpace(severity)) {
 	case "emergency":
-		return events.Severity_SEVERITY_EMERGENCY
+		return SeverityEmergency
 	case "alert":
-		return events.Severity_SEVERITY_ALERT
+		return SeverityAlert
 	case "critical":
-		return events.Severity_SEVERITY_CRITICAL
+		return SeverityCritical
 	case "error":
-		return events.Severity_SEVERITY_ERROR
+		return SeverityError
 	case "warning":
-		return events.Severity_SEVERITY_WARNING
+		return SeverityWarning
 	case "notice":
-		return events.Severity_SEVERITY_NOTICE
+		return SeverityNotice
 	case "informational":
-		return events.Severity_SEVERITY_INFORMATIONAL
+		return SeverityInformational
 	default:
-		return events.Severity_SEVERITY_UNKNOWN
+		return SeverityUnknown
 	}
 }
 
 // parseRequestOutcomeReason converts string outcome reason to RequestOutcomeReason enum
-func parseRequestOutcomeReason(reason string) events.RequestOutcomeReason {
+func parseRequestOutcomeReason(reason string) RequestOutcomeReason {
 	switch strings.ToUpper(strings.TrimSpace(reason)) {
 	case "SECURITY_WAF_OK":
-		return events.RequestOutcomeReason_SECURITY_WAF_OK
+		return SecurityWafOk
 	case "SECURITY_WAF_VIOLATION":
-		return events.RequestOutcomeReason_SECURITY_WAF_VIOLATION
+		return SecurityWafViolation
 	case "SECURITY_WAF_FLAGGED":
-		return events.RequestOutcomeReason_SECURITY_WAF_FLAGGED
+		return SecurityWafFlagged
 	case "SECURITY_WAF_VIOLATION_TRANSPARENT":
-		return events.RequestOutcomeReason_SECURITY_WAF_VIOLATION_TRANSPARENT
+		return SecurityWafViolationTransparent
 	default:
-		return events.RequestOutcomeReason_SECURITY_WAF_UNKNOWN
+		return SecurityWafUnknown
 	}
 }
 
 // parseRequestStatus converts string request status to RequestStatus enum
-func parseRequestStatus(status string) events.RequestStatus {
+func parseRequestStatus(status string) RequestStatus {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "blocked":
-		return events.RequestStatus_REQUEST_STATUS_BLOCKED
+		return RequestStatusBlocked
 	case "alerted":
-		return events.RequestStatus_REQUEST_STATUS_ALERTED
+		return RequestStatusAlerted
 	case "passed":
-		return events.RequestStatus_REQUEST_STATUS_PASSED
+		return RequestStatusPassed
 	default:
-		return events.RequestStatus_REQUEST_STATUS_UNKNOWN
+		return RequestStatusUnknown
 	}
 }
 
@@ -181,7 +179,7 @@ func parseUint32(value string) uint32 {
 	return 0
 }
 
-func mapKVToSecurityViolationEvent(log *events.SecurityViolationEvent,
+func mapKVToSecurityViolationEvent(log *SecurityViolationEvent,
 	kvMap map[string]string,
 ) {
 	log.PolicyName = kvMap["policy_name"]

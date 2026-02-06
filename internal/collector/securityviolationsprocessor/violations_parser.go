@@ -13,7 +13,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	events "github.com/nginx/agent/v3/api/grpc/events/v1"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +32,7 @@ func isValidProtobufString(data []byte) bool {
 }
 
 // parseViolationsData extracts violation data from the syslog key-value map
-func (p *securityViolationsProcessor) parseViolationsData(kvMap map[string]string) []*events.ViolationData {
+func (p *securityViolationsProcessor) parseViolationsData(kvMap map[string]string) []ViolationData {
 	violationDetails := kvMap["violation_details"]
 	if violationDetails == "" {
 		return nil
@@ -50,9 +49,9 @@ func (p *securityViolationsProcessor) parseViolationsData(kvMap map[string]strin
 	p.extractViolationContext(&xmlData)
 
 	// Process each violation
-	violationsData := make([]*events.ViolationData, 0, len(xmlData.RequestViolations.Violations))
+	violationsData := make([]ViolationData, 0, len(xmlData.RequestViolations.Violations))
 	for _, v := range xmlData.RequestViolations.Violations {
-		violation := &events.ViolationData{
+		violation := ViolationData{
 			ViolationDataName:    v.ViolName,
 			ViolationDataContext: strings.ToLower(v.Context),
 		}
@@ -117,7 +116,7 @@ type contextExtractResult struct {
 // extractContextDataFromXML extracts context data from XML based on violation context type
 func (p *securityViolationsProcessor) extractContextDataFromXML(
 	v *Violation, kvMap map[string]string,
-) *events.ContextData {
+) ContextData {
 	var result contextExtractResult
 
 	switch strings.ToLower(v.Context) {
@@ -349,8 +348,8 @@ func (p *securityViolationsProcessor) extractHeaderDataWithValues(
 // buildContextData constructs the final ContextData from extracted result
 func (p *securityViolationsProcessor) buildContextData(
 	result contextExtractResult, v *Violation, kvMap map[string]string,
-) *events.ContextData {
-	ctxData := &events.ContextData{}
+) ContextData {
+	ctxData := ContextData{}
 
 	// Handle already decoded data
 	if result.isB64Decoded {
@@ -416,11 +415,11 @@ func (p *securityViolationsProcessor) decodeStringOrWarn(encoded, context, field
 }
 
 // extractSignaturesFromXML extracts signature data from XML violation
-func (p *securityViolationsProcessor) extractSignaturesFromXML(v *Violation) []*events.SignatureData {
+func (p *securityViolationsProcessor) extractSignaturesFromXML(v *Violation) []SignatureData {
 	if len(v.SigData) == 0 {
 		return nil
 	}
-	signatures := make([]*events.SignatureData, len(v.SigData))
+	signatures := make([]SignatureData, len(v.SigData))
 
 	for i, s := range v.SigData {
 		// Decode base64 buffer
@@ -433,7 +432,7 @@ func (p *securityViolationsProcessor) extractSignaturesFromXML(v *Violation) []*
 			}
 		}
 
-		signatures[i] = &events.SignatureData{
+		signatures[i] = SignatureData{
 			SigDataId:           parseUint32(s.SigID),
 			SigDataBlockingMask: s.BlockingMask,
 			SigDataBuffer:       bufferStr,

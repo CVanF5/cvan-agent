@@ -16,7 +16,6 @@ import (
 
 	syslog "github.com/leodido/go-syslog/v4"
 	"github.com/leodido/go-syslog/v4/rfc3164"
-	events "github.com/nginx/agent/v3/api/grpc/events/v1"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -180,8 +179,8 @@ func (p *securityViolationsProcessor) processAppProtectMessage(lr plog.LogRecord
 
 func (p *securityViolationsProcessor) parseAppProtectLog(
 	message string, hostname *string,
-) *events.SecurityViolationEvent {
-	log := &events.SecurityViolationEvent{}
+) *SecurityViolationEvent {
+	log := &SecurityViolationEvent{}
 
 	assignHostnames(log, hostname)
 
@@ -201,7 +200,7 @@ func (p *securityViolationsProcessor) parseAppProtectLog(
 	return log
 }
 
-func assignHostnames(log *events.SecurityViolationEvent, hostname *string) {
+func assignHostnames(log *SecurityViolationEvent, hostname *string) {
 	if hostname == nil {
 		return
 	}
@@ -230,23 +229,23 @@ func extractIPFromHostname(hostname string) string {
 }
 
 // mapToOTelSeverity converts NAP severity to OTel severity number
-func (p *securityViolationsProcessor) mapToOTelSeverity(napSeverity events.Severity) plog.SeverityNumber {
+func (p *securityViolationsProcessor) mapToOTelSeverity(napSeverity Severity) plog.SeverityNumber {
 	switch napSeverity {
-	case events.Severity_SEVERITY_EMERGENCY:
+	case SeverityEmergency:
 		return plog.SeverityNumberFatal
-	case events.Severity_SEVERITY_ALERT:
+	case SeverityAlert:
 		return plog.SeverityNumberError
-	case events.Severity_SEVERITY_CRITICAL:
+	case SeverityCritical:
 		return plog.SeverityNumberError
-	case events.Severity_SEVERITY_ERROR:
+	case SeverityError:
 		return plog.SeverityNumberError
-	case events.Severity_SEVERITY_WARNING:
+	case SeverityWarning:
 		return plog.SeverityNumberWarn
-	case events.Severity_SEVERITY_NOTICE:
+	case SeverityNotice:
 		return plog.SeverityNumberInfo
-	case events.Severity_SEVERITY_INFORMATIONAL:
+	case SeverityInformational:
 		return plog.SeverityNumberInfo
-	case events.Severity_SEVERITY_UNKNOWN:
+	case SeverityUnknown:
 		// For unknown severity, use Info as a reasonable default for security events
 		return plog.SeverityNumberInfo
 	default:
@@ -256,7 +255,7 @@ func (p *securityViolationsProcessor) mapToOTelSeverity(napSeverity events.Sever
 }
 
 // buildStructuredBody creates a human-readable structured body with full violation details
-func (p *securityViolationsProcessor) buildStructuredBody(event *events.SecurityViolationEvent) string {
+func (p *securityViolationsProcessor) buildStructuredBody(event *SecurityViolationEvent) string {
 	var body strings.Builder
 
 	p.buildViolationSummary(&body, event)
@@ -272,7 +271,7 @@ func (p *securityViolationsProcessor) buildStructuredBody(event *events.Security
 // buildViolationSummary adds the primary violation summary
 func (p *securityViolationsProcessor) buildViolationSummary(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	fmt.Fprintf(body, "NGINX App Protect %s: %s\n",
 		event.GetRequestStatus().String(),
@@ -282,7 +281,7 @@ func (p *securityViolationsProcessor) buildViolationSummary(
 // buildPolicyAndHTTPInfo adds policy and HTTP request details
 func (p *securityViolationsProcessor) buildPolicyAndHTTPInfo(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	// Policy information
 	fmt.Fprintf(body, "Policy: %s | Support ID: %s\n",
@@ -306,7 +305,7 @@ func (p *securityViolationsProcessor) buildPolicyAndHTTPInfo(
 // buildSecurityDetails adds security-related information
 func (p *securityViolationsProcessor) buildSecurityDetails(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	if event.GetViolationRating() > 0 {
 		fmt.Fprintf(body, "Rating: %d\n", event.GetViolationRating())
@@ -338,7 +337,7 @@ func (p *securityViolationsProcessor) buildSecurityDetails(
 // buildViolationDetails adds detailed violations information
 func (p *securityViolationsProcessor) buildViolationDetails(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	if len(event.GetViolationsData()) == 0 {
 		return
@@ -373,17 +372,17 @@ func (p *securityViolationsProcessor) buildViolationDetails(
 // buildViolationKeywords adds context-specific keywords for test validation
 func (p *securityViolationsProcessor) buildViolationKeywords(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	for _, violation := range event.GetViolationsData() {
-		p.addViolationTypeKeywords(body, violation)
+		p.addViolationTypeKeywords(body, &violation)
 	}
 }
 
 // addViolationTypeKeywords adds specific violation type keywords
 func (p *securityViolationsProcessor) addViolationTypeKeywords(
 	body *strings.Builder,
-	violation *events.ViolationData,
+	violation *ViolationData,
 ) {
 	violationContext := violation.GetViolationDataContext()
 	violationName := violation.GetViolationDataName()
@@ -407,7 +406,7 @@ func (p *securityViolationsProcessor) addHeaderKeywords(
 	body *strings.Builder,
 	violationName string,
 	violationContext string,
-	violation *events.ViolationData,
+	violation *ViolationData,
 ) {
 	if strings.Contains(violationName, "HEADER") || violationContext == "header" {
 		body.WriteString("Header violations detected\n")
@@ -447,7 +446,7 @@ func (p *securityViolationsProcessor) addRequestKeywords(body *strings.Builder, 
 // buildSystemInfo adds system context information
 func (p *securityViolationsProcessor) buildSystemInfo(
 	body *strings.Builder,
-	event *events.SecurityViolationEvent,
+	event *SecurityViolationEvent,
 ) {
 	fmt.Fprintf(body, "System: %s | VS: %s\n",
 		event.GetSystemId(),

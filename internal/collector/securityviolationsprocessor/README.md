@@ -1,16 +1,16 @@
 # Security Violations Processor
 
-OpenTelemetry Collector processor that transforms NGINX App Protect security violation syslog messages into structured protobuf events.
+OpenTelemetry Collector processor that transforms NGINX App Protect security violation syslog messages into structured OTel-compliant events.
 
 ## What It Does
 
-Processes NGINX App Protect WAF syslog messages and transforms them into `SecurityViolationEvent` protobuf messages:
+Processes NGINX App Protect WAF syslog messages and transforms them into OTel-compliant log events with structured body content:
 
 1. Parses RFC3164 syslog messages (best-effort mode)
 2. Extracts CSV formatted data from NAP `secops_dashboard` log profile
 3. Parses XML violation details with context extraction (parameter, header, cookie, uri, request)
 4. Extracts attack signature details
-5. Outputs structured protobuf events for downstream consumption
+5. Outputs OpenTelemetry events with essential attributes and human-readable structured body
 
 ## Implementation
 
@@ -21,13 +21,14 @@ Processes NGINX App Protect WAF syslog messages and transforms them into `Securi
 | [`violations_parser.go`](violations_parser.go) | XML parsing, context extraction, signature parsing |
 | [`xml_structs.go`](xml_structs.go) | XML structure definitions (BADMSG, violation contexts) |
 | [`helpers.go`](helpers.go) | Utility functions |
+| [`types.go`](types.go) | Native Go types for security violation data structures |
 
-See individual files for implementation details. Protobuf schema defined in [`api/grpc/events/v1/security_violation.proto`](../../../api/grpc/events/v1/security_violation.proto).
+See individual files for implementation details.
 
 ## Requirements
 
 - **Input**: NAP syslog messages with `secops_dashboard` log profile (33 CSV fields)
-- **Output**: `SecurityViolationEvent` protobuf messages
+- **Output**: OTel-compliant events with essential attributes and structured body content
 
 ## Testing
 

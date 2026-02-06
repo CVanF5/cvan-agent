@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/leodido/go-syslog/v4/rfc3164"
-	events "github.com/nginx/agent/v3/api/grpc/events/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer/consumertest"
@@ -20,7 +19,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 )
 
 // loadTestData loads test data from testdata folder and wraps it in syslog format
@@ -40,7 +38,7 @@ func loadRawTestData(t *testing.T, filename string) string {
 }
 
 // validateEvent validates the security violation event in the new OTel-compliant format
-func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolationEvent {
+func validateEvent(t *testing.T, lrOut plog.LogRecord) *SecurityViolationEvent {
 	t.Helper()
 
 	// Validate OTel event structure
@@ -73,7 +71,7 @@ func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolation
 
 	// For testing purposes, rebuild a minimal SecurityViolationEvent from essential attributes only
 	// This allows the existing test assertions to continue working with our compromise approach
-	event := &events.SecurityViolationEvent{
+	event := &SecurityViolationEvent{
 		PolicyName: policyName.Str(),
 		SupportId:  supportId.Str(), // Support_id is now stored as string
 		RemoteAddr: remoteAddr.Str(),
@@ -84,11 +82,11 @@ func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolation
 	// Parse outcome
 	switch outcome.Str() {
 	case "REQUEST_OUTCOME_REJECTED":
-		event.RequestOutcome = events.RequestOutcome_REQUEST_OUTCOME_REJECTED
+		event.RequestOutcome = RequestOutcomeRejected
 	case "REQUEST_OUTCOME_PASSED":
-		event.RequestOutcome = events.RequestOutcome_REQUEST_OUTCOME_PASSED
+		event.RequestOutcome = RequestOutcomePassed
 	default:
-		event.RequestOutcome = events.RequestOutcome_REQUEST_OUTCOME_UNKNOWN
+		event.RequestOutcome = RequestOutcomeUnknown
 	}
 
 	// Get violation rating if present
@@ -102,21 +100,10 @@ func validateEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolation
 }
 
 // unmarshalEvent is deprecated - use validateEvent for new format
-func unmarshalEvent(t *testing.T, lrOut plog.LogRecord) *events.SecurityViolationEvent {
+func unmarshalEvent(t *testing.T, lrOut plog.LogRecord) *SecurityViolationEvent {
 	t.Helper()
-	// Check if this is the new format (string body)
-	if lrOut.Body().Type() == pcommon.ValueTypeStr {
-		return validateEvent(t, lrOut)
-	}
-
-	// Legacy protobuf format handling
-	processedBody := lrOut.Body().Bytes().AsRaw()
-
-	var actualEvent events.SecurityViolationEvent
-	protoErr := proto.Unmarshal(processedBody, &actualEvent)
-	require.NoError(t, protoErr, "Failed to unmarshal processed log body as SecurityViolationEvent")
-
-	return &actualEvent
+	// Always use the new format (string body)
+	return validateEvent(t, lrOut)
 }
 
 //nolint:lll,revive,maintidx // long test string kept for readability, table-driven test with many cases
@@ -492,7 +479,7 @@ func assertTest1Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes
 	assert.Equal(t, "nms_app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "5377540117854870581", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "127.0.0.1", actualEvent.GetRemoteAddr())
 	assert.Equal(t, uint32(5), actualEvent.GetViolationRating())
 
@@ -530,7 +517,7 @@ func assertTest2Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes only (compromise approach)
 	assert.Equal(t, "security_policy_01", actualEvent.GetPolicyName())
 	assert.Equal(t, "9876543210123456789", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "10.0.1.50", actualEvent.GetRemoteAddr())
 
 	// Validate body contains expected information
@@ -560,7 +547,7 @@ func assertTest6Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes only (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592519", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.Equal(t, "127.0.0.1", actualEvent.GetRemoteAddr())
 
 	// Validate body contains expected information
@@ -589,7 +576,7 @@ func assertTest7Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592517", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -619,7 +606,7 @@ func assertTest8Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592516", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -649,7 +636,7 @@ func assertTest9Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592514", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -679,7 +666,7 @@ func assertTest10Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592515", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -709,7 +696,7 @@ func assertTest11Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "3255056874564592517", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -739,7 +726,7 @@ func assertTest12Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592511", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -769,7 +756,7 @@ func assertTest13Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592512", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -799,7 +786,7 @@ func assertTest14Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "4355056874564592513", actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
@@ -830,7 +817,7 @@ func assertTest15Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains violation information
@@ -857,7 +844,7 @@ func assertTest16Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains violation information
@@ -884,7 +871,7 @@ func assertTest17Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains violation information
@@ -911,7 +898,7 @@ func assertTest18Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains violation information
@@ -937,7 +924,7 @@ func assertTest19Event(t *testing.T, record plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains violation information
@@ -965,7 +952,7 @@ func assertTest20Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	// Test 20 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all cookie violation information
@@ -993,7 +980,7 @@ func assertTest21Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	// Test 21 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all URL violation information
@@ -1022,7 +1009,7 @@ func assertTest22Event(t *testing.T, lrOut plog.LogRecord) {
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	// Test 22 has no expected support_id, accept whatever comes from actual data
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all request violation information
@@ -1053,7 +1040,7 @@ func assertTest23Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (should parse from CSV even with bad XML)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.Equal(t, "5543056874564592513", actualEvent.GetSupportId()) // From expectAttrs
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Should have empty violations due to malformed XML
@@ -1172,7 +1159,7 @@ func assertTest30Event(t *testing.T, lrOut plog.LogRecord) {
 	// Validate essential attributes (compromise approach)
 	assert.Equal(t, "app_protect_default_policy", actualEvent.GetPolicyName())
 	assert.NotEmpty(t, actualEvent.GetSupportId())
-	assert.Equal(t, events.RequestOutcome_REQUEST_OUTCOME_REJECTED, actualEvent.GetRequestOutcome())
+	assert.Equal(t, RequestOutcomeRejected, actualEvent.GetRequestOutcome())
 	assert.NotEmpty(t, actualEvent.GetRemoteAddr())
 
 	// Validate body contains all violation information
